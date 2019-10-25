@@ -2,9 +2,9 @@ package main
 
 import (
 	"fmt"
+	"git.code.oa.com/tke/theflow"
 	"github.com/pborman/uuid"
 	"log"
-	"theflow"
 )
 
 const (

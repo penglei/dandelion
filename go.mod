@@ -1,4 +1,4 @@
-module theflow
+module git.code.oa.com/tke/theflow
 
 go 1.13
 

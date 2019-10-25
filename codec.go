@@ -2,7 +2,7 @@ package theflow
 
 import (
 	"encoding/json"
-	"theflow/database"
+	"git.code.oa.com/tke/theflow/database"
 )
 
 type flowStateSerializable struct {

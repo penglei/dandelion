@@ -4,8 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"git.code.oa.com/tke/theflow"
 	_ "github.com/go-sql-driver/mysql"
-	"theflow"
 )
 
 type MySQLOptions struct {
@@ -26,7 +26,7 @@ func main() {
 		Password: "",
 		Name:     "tke_mesh",
 	}
-	userInfo := m.Username // + ":" + m.Password
+	userInfo := m.Username
 	//var dsn = fmt.Sprintf("%s@tcp(%s:%d)/%s?charset=%s&parseTime=True&loc=UTC&time_zone=%s", userInfo, m.Host, m.Port, m.Name, m.Charset, url.QueryEscape(`"+00:00"`))
 
 	dsn := fmt.Sprintf("%s@tcp(%s:%d)/%s?parseTime=true&charset=utf8mb4", userInfo, m.Host, m.Port, m.Name)

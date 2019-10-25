@@ -2,7 +2,7 @@ package theflow
 
 import (
 	"context"
-	"theflow/database"
+	"git.code.oa.com/tke/theflow/database"
 )
 
 type Status database.TypeStatusRaw
