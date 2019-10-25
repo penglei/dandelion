@@ -1,0 +1,59 @@
+= theflow
+
+== develop
+
+internal data type converting path
+
+[source]
+----
+
+ +---------+                       +----------------------+
+ | JobMeta |------ save to db ---->|database.JobMetaObject|
+ +---------+                       +----------------------+
+    |   ^                                       |      |
+    |   |                                       |      |
+    |   |                                       |      |
+    |   +----------- load from db --------------+      |
+    |                                                  |convert to create pending flow
+    |                                                  |
+    |                                                  |
+    |       +-----------------------------+            |
+    +------>|   database.FlowDataPartial  |<-----------+
+            +-----------------------------+
+                    |
+                    |
+                    |
+                    |save to db
+                    |
+                    |               +--------------------------+
+                    |               |                          |
+                    +-------------->| database.FlowDataObject  |
+                                    |                          |
+                                    +--------------------------+
+                                                     |
+                                                     |
+                                                     |
+             +------+                                |
+             | Flow |<---------load and generate-----+
+             +------+
+                |
+                |
+                |
+                |                +------+
+                +------------->  | Task |
+                                 +------+
+----
+
+== TODO
+
+
+* more informations like created time, description etc.
+* log **
+* executor error detail **
+* implement DAG task orchestration
+* query job flow status in runtime
+* task orchestration can visit flow scheme
+* save meta id (offset) in flow
+* FlowShapingManager can be protected by RCU
+* Runtime name(id) must be protected by lock. the runtime bootstraps with name has registered should be panic.
+* hide internal definition
