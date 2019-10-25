@@ -88,7 +88,7 @@ func (exc *Executor) spawn(ctx context.Context, j *Flow) error {
 
 		// finish the finishing work
 		if partialTasks == nil {
-			j.status = StatusSuccess
+			j.setStatus(StatusSuccess)
 			if err := j.persist(ctx, store); err != nil {
 				return newInternalError(err)
 			}
@@ -96,8 +96,7 @@ func (exc *Executor) spawn(ctx context.Context, j *Flow) error {
 			return nil
 		}
 
-		// real running
-		j.status = StatusRunning
+		j.setStatus(StatusRunning)
 		j.updateSpawnedTasks(partialTasks)
 		if err := j.persist(ctx, store); err != nil {
 			return newInternalError(err)
@@ -175,7 +174,7 @@ func (exc *Executor) spawn(ctx context.Context, j *Flow) error {
 
 			err = multiErrors{errors: taskErrors}
 
-			j.status = StatusFailure
+			j.setStatus(StatusFailure)
 			j.state.Error = err
 			if err := j.persist(ctx, store); err != nil {
 
@@ -192,17 +191,17 @@ func (exc *Executor) spawn(ctx context.Context, j *Flow) error {
 	return nil
 }
 
-func (exc *Executor) resumeOrSpawn(ctx context.Context, meta *JobMeta) {
+func (exc *Executor) run(ctx context.Context, meta *JobMeta) {
 	ctx = context.WithValue(ctx, contextJobMetaKey, meta)
 
-	log.Printf("resumeOrSpawn from meta: %v\n", meta.UUID)
+	log.Printf("run flow: %s\n", meta.uuid)
 
 	data := database.FlowDataPartial{
-		EventUUID: meta.UUID,
+		EventUUID: meta.uuid,
 		UserID:    meta.UserID,
-		Class:     meta.Class.Raw(),
+		Class:     meta.class.Raw(),
 		Status:    StatusPending.Raw(),
-		Storage:   meta.Data,
+		Storage:   meta.data,
 	}
 
 	obj, err := exc.store.GetOrCreateFlow(ctx, data)
@@ -230,7 +229,7 @@ func (exc *Executor) Run(ctx context.Context, metaCh <-chan *JobMeta) {
 		case <-ctx.Done():
 			return
 		case meta := <-metaCh:
-			go exc.resumeOrSpawn(ctx, meta)
+			go exc.run(ctx, meta)
 		}
 	}
 }

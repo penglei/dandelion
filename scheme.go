@@ -9,6 +9,7 @@ func (c FlowClass) Raw() string {
 }
 
 func FlowClassFromRaw(s string) FlowClass {
+	//TODO Checking
 	return FlowClass(s)
 }
 
@@ -17,9 +18,9 @@ type FlowScheme struct {
 	NewStorage func() interface{}
 	Tasks      func() TaskOrchestration
 	//TODO
-	OnRunning  func(*Context) //call before entering running status
-	OnCreating func(*Context) //first running
-	OnResuming func(*Context) //each of resume running
+	OnRunning  func(Context) //call before entering running status
+	OnCreating func(Context) //first running
+	OnResuming func(Context) //each of resume running
 }
 
 func (f *FlowScheme) NewOrchestration() TaskOrchestration {
@@ -37,12 +38,12 @@ type TaskOrchestration interface {
 }
 
 type TaskHandle interface {
-	Execute(ctx *Context) error
+	Execute(ctx Context) error
 }
 
-type TaskFn func(ctx *Context) error
+type TaskFn func(ctx Context) error
 
-func (t TaskFn) Execute(ctx *Context) error {
+func (t TaskFn) Execute(ctx Context) error {
 	return t(ctx)
 }
 

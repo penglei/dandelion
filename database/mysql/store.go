@@ -40,8 +40,8 @@ func (ms *mysqlStore) GetOrCreateFlow(ctx context.Context, data database.FlowDat
 
 	obj.FlowDataPartial = data
 
-	querySql := "SELECT id, storage, status, state FROM flow WHERE event_uuid = ?"
-	err = tx.QueryRowContext(ctx, querySql, data.EventUUID).Scan(&obj.ID, &obj.Storage, &obj.Status, &obj.State)
+	querySql := "SELECT id, storage, status, state, running_cnt FROM flow WHERE event_uuid = ?"
+	err = tx.QueryRowContext(ctx, querySql, data.EventUUID).Scan(&obj.ID, &obj.Storage, &obj.Status, &obj.State, &obj.RunningCnt)
 	if IsNoRowsError(err) {
 		var id int64
 		id, err = createPendingJobFlow(ctx, tx, &data)
@@ -85,15 +85,25 @@ func (ms *mysqlStore) CreatePendingFlow(ctx context.Context, dbJobMeta database.
 	return tx.Commit()
 }
 
-func (ms *mysqlStore) UpdateFlow(ctx context.Context, obj database.FlowDataObject, agentName string) error {
+func (ms *mysqlStore) UpdateFlowAtomic(ctx context.Context, obj database.FlowDataObject, agentName string, hasFinished bool) error {
 	tx, err := ms.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	updateSql := "UPDATE flow SET `status` = ?, `state` = ?, `storage` = ?, `agent_name` = ? WHERE id = ?"
-	_, err = tx.ExecContext(ctx, updateSql, obj.Status, obj.State, obj.Storage, agentName, obj.ID)
+	updateFieldsSql := "`status` = ?, `state` = ?, `storage` = ?, `agent_name` = ?, `running_cnt` = ?"
+
+	if hasFinished {
+		updateFieldsSql += ", `ended_at` = NOW()"
+	}
+	if obj.RunningCnt == 1 {
+		updateFieldsSql += ", `started_at` = NOW()"
+	}
+
+	updateSql := fmt.Sprintf("UPDATE flow SET %s WHERE id = ?", updateFieldsSql)
+
+	_, err = tx.ExecContext(ctx, updateSql, obj.Status, obj.State, obj.Storage, agentName, obj.RunningCnt, obj.ID)
 	if err != nil {
 		return err
 	}
@@ -178,6 +188,21 @@ func (ms *mysqlStore) DeleteJobEvent(ctx context.Context, uuid string) error {
 	}
 	if cnt != 1 {
 		return fmt.Errorf("delete event but it doesn't exit: %s", uuid)
+	}
+	return tx.Commit()
+}
+
+func (ms *mysqlStore) SetFlowStartTime(ctx context.Context, flowId int64) error {
+	updateSql := "update flow set `started_at` = now where"
+	tx, err := ms.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	_, err = tx.ExecContext(ctx, updateSql, flowId)
+	if err != nil {
+		return err
 	}
 	return tx.Commit()
 }

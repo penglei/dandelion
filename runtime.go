@@ -201,11 +201,11 @@ func (rt *Runtime) fetchAllJobEvents(ctx context.Context) ([]*JobMeta, error) {
 	metas := make([]*JobMeta, 0)
 	for _, obj := range objects {
 		metas = append(metas, &JobMeta{
-			ID:     obj.ID,
-			UUID:   obj.UUID,
+			id:     obj.ID,
+			uuid:   obj.UUID,
 			UserID: obj.UserID,
-			Class:  FlowClassFromRaw(obj.Class),
-			Data:   obj.Data,
+			class:  FlowClassFromRaw(obj.Class),
+			data:   obj.Data,
 		})
 	}
 	return metas, nil
@@ -235,6 +235,7 @@ func (rt *Runtime) iterateJobs(ctx context.Context) error {
 }
 
 func (rt *Runtime) onLockManipulatorError(reason error) {
+	//TODO parse all executors
 	fmt.Printf("lock connection lost: %v\n", reason)
 	lockManipulator, err := rt.lockManipulatorBuilder()
 	if err != nil {
@@ -245,18 +246,19 @@ func (rt *Runtime) onLockManipulatorError(reason error) {
 	defer rt.lmMutex.Unlock()
 	rt.lockManipulator = lockManipulator
 	if err = rt.lockManipulator.Bootstrap(rt.ctx, rt.onLockManipulatorError); err != nil {
-		//TODO stop all executor
+		//TODO stop all executors
 		panic(fmt.Sprintf("rerun lock manipulator error: %v", err))
 	}
+	//TODO resume all executors
 }
 
 func (rt *Runtime) onJobFinished(meta *JobMeta) {
 	key := rt.getJobQueueName(meta)
 	rt.shapingManager.Commit(key, meta)
 
-	err := rt.store.DeleteJobEvent(rt.ctx, meta.UUID)
+	err := rt.store.DeleteJobEvent(rt.ctx, meta.uuid)
 	if err != nil {
-		//TODO important! error log, should retry!
+		//TODO important! error log, can retry!
 	}
 	rt.forward()
 }
@@ -299,7 +301,7 @@ func (rt *Runtime) dispatchJobEvents(ctx context.Context, metas []*JobMeta) {
 }
 
 func (rt *Runtime) getJobQueueName(meta *JobMeta) string {
-	queueName := fmt.Sprintf("%s:%s:%s", rt.lockGranularity, meta.UserID, meta.Class)
+	queueName := fmt.Sprintf("%s:%s:%s", rt.lockGranularity, meta.UserID, meta.class)
 	return queueName
 }
 

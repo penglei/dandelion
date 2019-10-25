@@ -5,53 +5,60 @@ import (
 	"time"
 )
 
-type Context struct {
+type Context interface {
+	context.Context
+	Global() interface{}
+	Save() error
+	TxSave(func(interface{}) error) error
+}
+
+type taskContext struct {
 	base  context.Context
-	job   *Flow
+	flow  *Flow
 	task  *Task
 	store RuntimeStore
 }
 
-func (ctx *Context) Deadline() (deadline time.Time, ok bool) {
+func (ctx *taskContext) Deadline() (deadline time.Time, ok bool) {
 	return ctx.base.Deadline()
 }
 
-func (ctx *Context) Done() <-chan struct{} {
+func (ctx *taskContext) Done() <-chan struct{} {
 	return ctx.base.Done()
 }
 
-func (ctx *Context) Err() error {
+func (ctx *taskContext) Err() error {
 	return ctx.base.Err()
 }
 
-func (ctx *Context) Value(key interface{}) interface{} {
+func (ctx *taskContext) Value(key interface{}) interface{} {
 	return ctx.base.Value(key)
 }
 
-func NewContext(ctx context.Context, store RuntimeStore, job *Flow, task *Task) *Context {
-	return &Context{
+func NewContext(ctx context.Context, store RuntimeStore, job *Flow, task *Task) *taskContext {
+	return &taskContext{
 		base:  ctx,
-		job:   job,
+		flow:  job,
 		store: store,
 		task:  task,
 	}
 }
 
-func (ctx *Context) Global() interface{} {
+func (ctx *taskContext) Global() interface{} {
 	//TODO log race condition warning
-	return ctx.job.storage
+	return ctx.flow.storage
 }
 
-func (ctx *Context) Save() error {
+func (ctx *taskContext) Save() error {
 	// it needn't to throw out the err.
-	// as job has cached storage, flow can continue to run.
-	_ = persistStorage(ctx, ctx.store, ctx.job)
+	// as flow has cached storage, flow can continue to run.
+	_ = persistStorage(ctx, ctx.store, ctx.flow)
 	return nil
 }
 
 //TODO
-func (ctx *Context) TxSave(cb func(interface{})) {
-	cb(ctx.job.storage)
+func (ctx *taskContext) TxSave(cb func(interface{}) error) error {
+	return cb(ctx.flow.storage)
 }
 
 func persistStorage(ctx context.Context, store RuntimeStore, j *Flow) error {
@@ -62,4 +69,4 @@ func persistStorage(ctx context.Context, store RuntimeStore, j *Flow) error {
 	return store.SaveFlowStorage(ctx, j.flowId, data)
 }
 
-var _ context.Context = &Context{}
+var _ context.Context = &taskContext{}

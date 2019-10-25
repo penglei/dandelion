@@ -17,10 +17,10 @@ CREATE TABLE job_event (
     `data`          TEXT NOT NULL,
     `created_at`    TIMESTAMP NOT NULL DEFAULT NOW(),
     `deleted_at`    TIMESTAMP DEFAULT NULL,
-    `deleted_flag`  BIGINT(11)  NOT NULL DEFAULT 0,
+    `deleted_flag`  BIGINT(11)  NOT NULL DEFAULT 0, -- TODO not implement
     PRIMARY KEY (`id`),
     KEY `idx_user_class_queue` (`userid`, `class`),
-    UNIQUE KEY `idx_event_job_uuid` (`uuid`)
+    UNIQUE KEY `idx_job_uuid` (`uuid`)
 )
     AUTO_INCREMENT = 1
     DEFAULT CHARSET = utf8mb4;
@@ -45,6 +45,8 @@ CREATE TABLE flow (
     `storage`           TEXT NOT NULL,
     `status`            CHAR(16) NOT NULL DEFAULT '',  -- pending, running, success, failure
     `state`             TEXT NOT NULL, -- json format
+    -- `job_created_at`    TIMESTAMP NOT NULL, -- TODO
+    `running_cnt`       INT(11) NOT NULL DEFAULT 0,
     `started_at`        TIMESTAMP DEFAULT NULL,
     `ended_at`          TIMESTAMP DEFAULT NULL,
     `agent_name`        CHAR(16) NOT NULL DEFAULT '', -- the last agent which executes flow task
@@ -52,7 +54,7 @@ CREATE TABLE flow (
     `updated_at`        TIMESTAMP NOT NULL DEFAULT now() ON UPDATE NOW(),
     `deleted_at`        TIMESTAMP DEFAULT NULL,
     `deleted_flag`      BIGINT(11)  NOT NULL DEFAULT 0,
-    UNIQUE KEY `idx_flow_job_uuid` (`event_uuid`),
+    UNIQUE KEY `idx_job_event_uuid` (`event_uuid`),
     PRIMARY KEY (`id`)
 )
     AUTO_INCREMENT = 1

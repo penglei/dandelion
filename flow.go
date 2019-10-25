@@ -23,19 +23,19 @@ func StatusFromRaw(s database.TypeStatusRaw) Status {
 }
 
 type JobMeta struct {
-	ID     int64 //must be total order
-	UUID   string
+	id     int64 //must be total order
+	uuid   string
 	UserID string
-	Class  FlowClass
-	Data   []byte
+	class  FlowClass
+	data   []byte
 }
 
 func (jm *JobMeta) GetOffset() int64 {
-	return jm.ID
+	return jm.id
 }
 
 func (jm *JobMeta) GetUUID() string {
-	return jm.UUID
+	return jm.uuid
 }
 
 type Flow struct {
@@ -43,13 +43,16 @@ type Flow struct {
 	uid           string
 	scheme        *FlowScheme
 	orchestration TaskOrchestration
-	//persistent content
-	status  Status
-	storage interface{}
-	state   *FlowInternalState
+	status        Status
+	storage       interface{}
+	state         *FlowInternalState
+	hasFinished   bool
+	runningCnt    int
 }
 
+//should be called in spawn main loop only
 func (j *Flow) persist(ctx context.Context, store RuntimeStore) error {
+	//basic
 	//status
 	//data
 	//state
@@ -64,16 +67,17 @@ func (j *Flow) persist(ctx context.Context, store RuntimeStore) error {
 
 	//TODO started_at, ended_at, error_msg...
 	obj := database.FlowDataObject{
-		ID: j.flowId,
 		FlowDataPartial: database.FlowDataPartial{
 			Status:  j.status.Raw(),
 			Storage: storage,
 			State:   state,
 		},
+		ID:         j.flowId,
+		RunningCnt: j.runningCnt,
 	}
 
 	agentName := ctx.Value(contextAgentNameKey).(string)
-	err = store.UpdateFlow(ctx, obj, agentName)
+	err = store.UpdateFlowAtomic(ctx, obj, agentName, j.hasFinished)
 
 	return err
 }
@@ -84,6 +88,16 @@ func (j *Flow) persistTask(ctx context.Context, store RuntimeStore, t *Task) err
 }
 
 func (j *Flow) setStatus(status Status) {
+	if status == StatusRunning {
+		if j.status == StatusPending {
+			//first running
+			j.runningCnt = 1
+		} else {
+			j.runningCnt += 1
+		}
+	}
+
+	j.hasFinished = status == StatusFailure || status == StatusSuccess
 	j.status = status
 }
 
@@ -100,9 +114,6 @@ type Task struct {
 	name   string
 	status Status
 	scheme *TaskScheme
-	//retryCnt int
-	//beginAt  time.Time
-	//stopAt   time.Time
 }
 
 func newTask(name string, status Status) *Task {
@@ -129,7 +140,7 @@ func NewFlowInternalState() *FlowInternalState {
 }
 
 func newFlow(dbFlowObj database.FlowDataObject) (*Flow, error) {
-	scheme, err := Resolve(FlowClass(dbFlowObj.Class))
+	scheme, err := Resolve(FlowClassFromRaw(dbFlowObj.Class))
 	if err != nil {
 		return nil, err
 	}
@@ -168,6 +179,7 @@ func newFlow(dbFlowObj database.FlowDataObject) (*Flow, error) {
 		scheme:        scheme,
 		storage:       storage,
 		orchestration: orchestration,
+		runningCnt:    dbFlowObj.RunningCnt,
 	}
 	return j, nil
 }

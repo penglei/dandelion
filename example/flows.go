@@ -5,6 +5,7 @@ import (
 	"git.code.oa.com/tke/theflow"
 	"github.com/pborman/uuid"
 	"log"
+	"time"
 )
 
 const (
@@ -66,17 +67,18 @@ type meshInstallJob struct {
 	k8ss k8sService
 }
 
-func (mj *meshInstallJob) FirstTask(ctx *Context) error {
+func (mj *meshInstallJob) FirstTask(ctx Context) error {
 	meshName := "mesh-" + uuid.New()
 	log.Println("first task running: " + meshName)
 	storage := ctx.Global().(*InstallMeshStorage)
 	storage.MeshName = meshName
 	log.Printf("FirstTask read job data: %v", mj.data)
 	mj.data.Bar = 456
+	time.Sleep(time.Second * 2)
 	return ctx.Save()
 }
 
-func (mj *meshInstallJob) SecondTask(ctx *Context) error {
+func (mj *meshInstallJob) SecondTask(ctx Context) error {
 	storage := ctx.Global().(*InstallMeshStorage)
 	log.Printf("run second task, istio: %s\n", storage.MeshName)
 	log.Printf("SecondTask read job data: %v", mj.data)
