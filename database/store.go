@@ -43,5 +43,5 @@ type RuntimeStore interface {
 	SetFlowStartTime(ctx context.Context, flowId int64) error
 	SaveFlowStorage(ctx context.Context, flowId int64, data []byte) error
 	SaveFlowTask(ctx context.Context, flowId int64, taskName string, status TypeStatusRaw) error
-	CreatePendingFlow(context.Context, JobMetaObject, TypeStatusRaw) error
+	CreatePendingFlow(context.Context, JobMetaObject, TypeStatusRaw, []byte) error
 }

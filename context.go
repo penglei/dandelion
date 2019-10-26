@@ -35,7 +35,7 @@ func (ctx *taskContext) Value(key interface{}) interface{} {
 	return ctx.base.Value(key)
 }
 
-func NewContext(ctx context.Context, store RuntimeStore, job *Flow, task *Task) *taskContext {
+func NewContext(ctx context.Context, store RuntimeStore, job *Flow, task *Task) Context {
 	return &taskContext{
 		base:  ctx,
 		flow:  job,
@@ -69,4 +69,4 @@ func persistStorage(ctx context.Context, store RuntimeStore, j *Flow) error {
 	return store.SaveFlowStorage(ctx, j.flowId, data)
 }
 
-var _ context.Context = &taskContext{}
+var _ Context = &taskContext{}

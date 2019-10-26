@@ -15,7 +15,7 @@ func (c *ChainedFlowTasks) Prepare(state *FlowInternalState) {
 	c.nextIndex = 0
 }
 
-func (c *ChainedFlowTasks) Resume(state *FlowInternalState) error {
+func (c *ChainedFlowTasks) Restore(state *FlowInternalState) error {
 	spawnedSize := len(state.SpawnedTasks)
 
 	/*

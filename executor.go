@@ -73,122 +73,179 @@ func (e ExceedLimitError) Error() string {
 
 var _ error = ExceedLimitError{}
 
+type taskErrorSanitation struct {
+	hasError       *atomic.Bool
+	businessErrors sync.Map
+	internalErrors sync.Map
+}
+
+func newTasksErrorSanitation() *taskErrorSanitation {
+
+	return &taskErrorSanitation{
+		hasError:       atomic.NewBool(false),
+		businessErrors: sync.Map{},
+		internalErrors: sync.Map{},
+	}
+}
+
+func (tes *taskErrorSanitation) HasError() bool {
+	return tes.hasError.Load()
+}
+
+func (tes *taskErrorSanitation) Errors(name string) error {
+	/*
+		var err error
+		taskErrors := make([]error, 0)
+		for _, task := range partialTasks {
+			if err, ok := processErrors.Load(name); ok {
+				taskErrors = append(taskErrors, err.(processError))
+			} else if err, ok := internalErrors.Load(name); ok {
+				taskErrors = append(taskErrors, err.(internalError))
+			} else {
+				// this task has no error
+			}
+		}
+
+		if len(taskErrors) == 0 {
+			panic("!unreachable")
+		}
+
+		if len(taskErrors) == 1 {
+			err = taskErrors[0]
+		}
+	*/
+
+	return nil
+
+}
+
+func (tes *taskErrorSanitation) AddBusinessError(taskName string, err error) {
+	tes.hasError.Store(true)
+	tes.businessErrors.Store(taskName, newProcessError(err))
+}
+
+func (tes *taskErrorSanitation) AddInternalError(taskName string, err error) {
+	tes.hasError.Store(true)
+	tes.internalErrors.Store(taskName, newInternalError(err))
+}
+
 type Executor struct {
 	name        string
 	store       database.RuntimeStore
 	notifyAgent *NotificationAgent
 }
 
-func (exc *Executor) spawn(ctx context.Context, j *Flow) error {
+//task.setStatus(StatusPending)
+func (exc *Executor) runTask(
+	ctx context.Context,
+	f *Flow,
+	task *Task,
+	wg *sync.WaitGroup,
+	tes *taskErrorSanitation,
+) {
+
+	defer func() {
+		wg.Done()
+		p := recover()
+		if p != nil {
+			bizErr := fmt.Errorf("task panic: %v", p)
+			tes.AddBusinessError(task.scheme.Name, bizErr)
+		}
+
+		_ = f.persistTask(ctx, exc.store, task)
+	}()
+
+	task.setStatus(StatusRunning)
+	/*
+		err := f.persistTask(ctx, exc.store, task)
+		if err != nil {
+			tes.AddInternalError(task.name, err)
+			return
+		}
+
+	*/
+
+	flowContext := NewContext(ctx, exc.store, f, task)
+	// task can't be resumed from intermediate state
+	if err := task.scheme.Task.Execute(flowContext); err != nil {
+		tes.AddBusinessError(task.name, err)
+		return
+	}
+}
+
+func (exc *Executor) dealPending(ctx context.Context, j *Flow) error {
+	j.orchestration.Prepare(j.state)
+	j.setStatus(StatusRunning)
+	return j.persist(ctx, exc.store)
+}
+func (exc *Executor) dealRunning(ctx context.Context, f *Flow) error {
+	orchestration := f.orchestration
 	store := exc.store
-	orchestration := j.orchestration
+	err := orchestration.Restore(f.state)
+	if err != nil {
+		return err
+	}
 
 	for {
 		partialTasks := orchestration.Next()
-
-		// finish the finishing work
 		if partialTasks == nil {
-			j.setStatus(StatusSuccess)
-			if err := j.persist(ctx, store); err != nil {
-				return newInternalError(err)
-			}
-			exc.notifyAgent.TriggerJobFinished(ctx.Value(contextJobMetaKey).(*JobMeta))
-			return nil
+			f.setStatus(StatusSuccess)
+			//TODO setEndedAt
+			return f.persist(ctx, store)
 		}
 
-		j.setStatus(StatusRunning)
-		j.updateSpawnedTasks(partialTasks)
-		if err := j.persist(ctx, store); err != nil {
-			return newInternalError(err)
-		}
+		tes := newTasksErrorSanitation()
 
-		hasTasksError := atomic.NewBool(false)
-		processErrors := sync.Map{}
-		internalErrors := sync.Map{}
-		wg := sync.WaitGroup{}
-		taskAmount := len(partialTasks)
-		wg.Add(taskAmount)
+		wg := &sync.WaitGroup{}
+		wg.Add(len(partialTasks))
 		for _, task := range partialTasks {
-			flowContext := NewContext(ctx, store, j, task)
 			go func(task *Task) {
-				var err error
-				defer func() {
-					wg.Done()
-					p := recover()
-					if p != nil {
-						err = fmt.Errorf("task panic: %v", p)
-						processErrors.Store(task.scheme.Name, newProcessError(err))
-					}
-
-					if err != nil {
-						task.status = StatusFailure
-						hasTasksError.Store(true)
-					} else {
-						task.status = StatusSuccess
-					}
-
-					if err := j.persistTask(ctx, store, task); err != nil {
-						hasTasksError.Store(true)
-						internalErrors.Store(task.scheme.Name, newInternalError(err))
-					}
-
-				}()
-
-				task.status = StatusRunning
-				err = j.persistTask(ctx, store, task)
-				if err != nil {
-					internalErrors.Store(task.scheme.Name, newInternalError(err))
-					return
-				}
-
-				err = task.scheme.Task.Execute(flowContext)
-				if err != nil {
-					processErrors.Store(task.scheme.Name, newProcessError(err))
-					return
-				}
+				exc.runTask(ctx, f, task, wg, tes)
 			}(task)
 		}
-
 		wg.Wait()
 
-		if hasTasksError.Load() {
-			var err error
-			taskErrors := make([]error, 0)
-			for _, task := range partialTasks {
-				if err, ok := processErrors.Load(task.name); ok {
-					taskErrors = append(taskErrors, err.(processError))
-				} else if err, ok := internalErrors.Load(task.name); ok {
-					taskErrors = append(taskErrors, err.(internalError))
-				} else {
-					// this task has no error
-				}
-			}
-
-			if len(taskErrors) == 0 {
-				panic("!unreachable")
-			}
-
-			if len(taskErrors) == 1 {
-				err = taskErrors[0]
-			}
-
-			err = multiErrors{errors: taskErrors}
-
-			j.setStatus(StatusFailure)
-			j.state.Error = err
-			if err := j.persist(ctx, store); err != nil {
-
-				return newInternalError(err)
-			} else {
-				//TODO don't commit if it is internal error?
-				exc.notifyAgent.TriggerJobFinished(ctx.Value(contextJobMetaKey).(*JobMeta))
-			}
-
-			return err
+		if tes.HasError() {
+			f.setStatus(StatusFailure)
+			return f.persist(ctx, store)
 		}
 	}
+}
 
+func (exc *Executor) dealFailure(ctx context.Context, j *Flow) error {
+	exc.notifyAgent.TriggerJobFinished(ctx.Value(contextJobMetaKey))
 	return nil
+}
+func (exc *Executor) dealSuccess(ctx context.Context, j *Flow) error {
+	exc.notifyAgent.TriggerJobFinished(ctx.Value(contextJobMetaKey))
+	return nil
+}
+
+func (exc *Executor) spawn(ctx context.Context, j *Flow) error {
+	for {
+		switch j.status {
+		case StatusPending:
+			if err := exc.dealPending(ctx, j); err != nil {
+				return err
+			}
+		case StatusRunning:
+			if err := exc.dealRunning(ctx, j); err != nil {
+				return err
+			}
+		case StatusFailure:
+			if err := exc.dealFailure(ctx, j); err != nil {
+				return err
+			}
+			return nil
+		case StatusSuccess:
+			if err := exc.dealSuccess(ctx, j); err != nil {
+				return err
+			}
+			return nil
+		default:
+			panic("unknown flow status")
+		}
+	}
 }
 
 func (exc *Executor) run(ctx context.Context, meta *JobMeta) {

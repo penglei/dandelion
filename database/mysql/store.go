@@ -57,15 +57,19 @@ func (ms *mysqlStore) GetOrCreateFlow(ctx context.Context, data database.FlowDat
 
 func createPendingJobFlow(ctx context.Context, tx *sql.Tx, data *database.FlowDataPartial) (int64, error) {
 	//XXX state is empty now, executor will initialize it.
-	createSql := "INSERT INTO flow (event_uuid, userid, class, status, storage, state) VALUES (?, ?, ?, ?, ?, '')"
-	result, err := tx.ExecContext(ctx, createSql, data.EventUUID, data.UserID, data.Class, data.Status, data.Storage)
+	createSql := "INSERT INTO flow (event_uuid, userid, class, status, storage, state) VALUES (?, ?, ?, ?, ?, ?)"
+	result, err := tx.ExecContext(ctx, createSql, data.EventUUID, data.UserID, data.Class, data.Status, data.Storage, data.State)
 	if err != nil {
 		return 0, err
 	}
 	return result.LastInsertId()
 }
 
-func (ms *mysqlStore) CreatePendingFlow(ctx context.Context, dbJobMeta database.JobMetaObject, status database.TypeStatusRaw) error {
+func (ms *mysqlStore) CreatePendingFlow(
+	ctx context.Context,
+	dbJobMeta database.JobMetaObject,
+	status database.TypeStatusRaw,
+	state []byte) error {
 	tx, err := ms.db.Begin()
 	if err != nil {
 		return err
@@ -77,6 +81,7 @@ func (ms *mysqlStore) CreatePendingFlow(ctx context.Context, dbJobMeta database.
 		Class:     dbJobMeta.Class,
 		Status:    status,
 		Storage:   dbJobMeta.Data,
+		State:     state,
 	}
 	_, err = createPendingJobFlow(ctx, tx, &data)
 	if err != nil {

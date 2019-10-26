@@ -39,15 +39,16 @@ func (jm *JobMeta) GetUUID() string {
 }
 
 type Flow struct {
-	flowId        int64
-	uid           string
-	scheme        *FlowScheme
-	orchestration TaskOrchestration
-	status        Status
-	storage       interface{}
-	state         *FlowInternalState
-	hasFinished   bool
-	runningCnt    int
+	flowId            int64
+	uid               string
+	scheme            *FlowScheme
+	orchestration     TaskOrchestration
+	status            Status
+	storage           interface{}
+	state             *FlowInternalState
+	hasFinished       bool
+	runningCnt        int
+	startedAtHasSaved bool
 }
 
 //should be called in spawn main loop only
@@ -76,8 +77,15 @@ func (j *Flow) persist(ctx context.Context, store RuntimeStore) error {
 		RunningCnt: j.runningCnt,
 	}
 
+	saveStartTimeFlag := false
+	if j.runningCnt == 1 && !j.startedAtHasSaved {
+		saveStartTimeFlag = true
+	}
 	agentName := ctx.Value(contextAgentNameKey).(string)
 	err = store.UpdateFlowAtomic(ctx, obj, agentName, j.hasFinished)
+	if err != nil {
+		j.startedAtHasSaved = saveStartTimeFlag
+	}
 
 	return err
 }
@@ -124,8 +132,16 @@ func newTask(name string, status Status) *Task {
 	}
 }
 
+func (t *Task) setStatus(status Status) {
+	t.status = status
+}
+
 func (t *Task) setScheme(scheme *TaskScheme) {
 	t.scheme = scheme
+}
+
+func (t *Task) persist() {
+
 }
 
 type FlowInternalState struct {
@@ -151,35 +167,23 @@ func newFlow(dbFlowObj database.FlowDataObject) (*Flow, error) {
 		return nil, err
 	}
 
-	// initialize or resume internal state
 	orchestration := scheme.NewOrchestration()
 	state := NewFlowInternalState()
-	if StatusFromRaw(dbFlowObj.Status) == StatusPending {
-		orchestration.Prepare(state)
-	} else {
-		if len(dbFlowObj.State) > 0 {
-			err := deserializeInternalState(dbFlowObj.State, state)
-			if err != nil {
-				return nil, err
-			}
-			err = orchestration.Resume(state)
-			if err != nil {
-				return nil, err
-			}
-		} else {
-			panic("unreachable: persisted task that have been left pending status should have internal state!")
-		}
+
+	if err = deserializeInternalState(dbFlowObj.State, state); err != nil {
+		return nil, err
 	}
 
 	j := &Flow{
-		flowId:        dbFlowObj.ID,
-		uid:           dbFlowObj.UserID,
-		status:        StatusFromRaw(dbFlowObj.Status),
-		state:         state,
-		scheme:        scheme,
-		storage:       storage,
-		orchestration: orchestration,
-		runningCnt:    dbFlowObj.RunningCnt,
+		flowId:            dbFlowObj.ID,
+		uid:               dbFlowObj.UserID,
+		status:            StatusFromRaw(dbFlowObj.Status),
+		state:             state,
+		scheme:            scheme,
+		storage:           storage,
+		orchestration:     orchestration,
+		runningCnt:        dbFlowObj.RunningCnt,
+		startedAtHasSaved: dbFlowObj.RunningCnt > 0,
 	}
 	return j, nil
 }

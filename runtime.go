@@ -184,10 +184,21 @@ func (rt *Runtime) CreateJob(ctx context.Context, uid string, class FlowClass, j
 	}
 
 	//be visible for querying flow as soon as possible
-	err = rt.store.CreatePendingFlow(ctx, dbJobMeta, StatusPending.Raw())
-	if err != nil {
-		//warning
-		log.Printf("precreate pending job error:%v", err)
+	if scheme, err := Resolve(class); err != nil {
+		return err
+	} else {
+		orchestration := scheme.NewOrchestration()
+		state := NewFlowInternalState()
+		orchestration.Prepare(state)
+		stateBytes, err := serializeInternalState(state)
+		if err != nil {
+			return err
+		}
+		err = rt.store.CreatePendingFlow(ctx, dbJobMeta, StatusPending.Raw(), stateBytes)
+		if err != nil {
+			//warning
+			log.Printf("precreate pending job error:%v", err)
+		}
 	}
 	return nil
 }

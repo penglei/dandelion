@@ -11,7 +11,7 @@ func (d *DAGFlowTask) Prepare(state *FlowInternalState) {
 	panic("implement me")
 }
 
-func (d *DAGFlowTask) Resume(state *FlowInternalState) error {
+func (d *DAGFlowTask) Restore(state *FlowInternalState) error {
 	panic("implement me")
 }
 

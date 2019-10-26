@@ -59,3 +59,14 @@ func main() {
 	<-stopCh
 	cancelFn()
 }
+
+func init() {
+	jobTaskEntry := &meshInstallJob{
+		Data: customData{
+			Foo: "some_config_here",
+			Bar: 123,
+		},
+		K8sSvc: NewFakeK8sService(),
+	}
+	RegisterJobFlow(jobTaskEntry)
+}

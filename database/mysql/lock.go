@@ -145,7 +145,7 @@ func (m *mysqlLockManipulator) doLockRequest(ctx context.Context, key string) (b
 }
 
 //acquire lock for the key.
-//the method will block the request for a while, caller running in a new gorouting is better.
+//the method will block the request for a while, caller running in a new goroutine is better.
 func (m *mysqlLockManipulator) AcquireLock(ctx context.Context, key string) (bool, error) {
 
 	isOwned, err := m.checkSchemeLockWhetherIsOwned(ctx, key)
