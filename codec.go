@@ -5,9 +5,8 @@ import (
 	"git.code.oa.com/tke/theflow/database"
 )
 
-type flowStateSerializable struct {
+type flowPlanStateSerializable struct {
 	SpawnedTasks map[string]taskStateSerializable `json:"spawned_tasks"`
-	Error        string                           `json:"error,omitempty"`
 }
 
 type taskStateSerializable struct {
@@ -15,8 +14,8 @@ type taskStateSerializable struct {
 	Name   string                 `json:"name"`
 }
 
-func deserializeInternalState(data []byte, s *FlowInternalState) error {
-	serializableState := &flowStateSerializable{
+func deserializePlanState(data []byte, s *FlowExecPlanState) error {
+	serializableState := &flowPlanStateSerializable{
 		SpawnedTasks: make(map[string]taskStateSerializable),
 	}
 	if err := json.Unmarshal(data, serializableState); err != nil {
@@ -30,9 +29,9 @@ func deserializeInternalState(data []byte, s *FlowInternalState) error {
 
 }
 
-func serializeInternalState(s *FlowInternalState) ([]byte, error) {
+func serializePlanState(s *FlowExecPlanState) ([]byte, error) {
 
-	serializableState := flowStateSerializable{
+	serializableState := flowPlanStateSerializable{
 		SpawnedTasks: make(map[string]taskStateSerializable, len(s.SpawnedTasks)),
 	}
 
@@ -42,10 +41,6 @@ func serializeInternalState(s *FlowInternalState) ([]byte, error) {
 			Name:   task.name,
 		}
 		serializableState.SpawnedTasks[i] = taskSerializable
-	}
-
-	if s.Error != nil {
-		serializableState.Error = s.Error.Error()
 	}
 
 	return json.Marshal(serializableState)

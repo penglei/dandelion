@@ -11,11 +11,11 @@ type ChainedFlowTasks struct {
 	schemes     []*TaskScheme
 }
 
-func (c *ChainedFlowTasks) Prepare(state *FlowInternalState) {
+func (c *ChainedFlowTasks) Prepare(state *FlowExecPlanState) {
 	c.nextIndex = 0
 }
 
-func (c *ChainedFlowTasks) Restore(state *FlowInternalState) error {
+func (c *ChainedFlowTasks) Restore(state *FlowExecPlanState) error {
 	spawnedSize := len(state.SpawnedTasks)
 
 	/*

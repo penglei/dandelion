@@ -188,9 +188,9 @@ func (rt *Runtime) CreateJob(ctx context.Context, uid string, class FlowClass, j
 		return err
 	} else {
 		orchestration := scheme.NewOrchestration()
-		state := NewFlowInternalState()
+		state := NewFlowExecPlanState()
 		orchestration.Prepare(state)
-		stateBytes, err := serializeInternalState(state)
+		stateBytes, err := serializePlanState(state)
 		if err != nil {
 			return err
 		}

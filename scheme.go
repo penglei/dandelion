@@ -30,8 +30,8 @@ func (f *FlowScheme) NewOrchestration() TaskOrchestration {
 //TaskOrchestration is associated with each flow(tasks) definition,
 //because of preparing state may require tasks' detail information.
 type TaskOrchestration interface {
-	Prepare(state *FlowInternalState)
-	Restore(state *FlowInternalState) error
+	Prepare(state *FlowExecPlanState)
+	Restore(state *FlowExecPlanState) error
 	Next() []*Task
 	Update([]*Task)
 }

@@ -44,7 +44,7 @@ CREATE TABLE flow (
     `class`             CHAR(32) NOT NULL DEFAULT '',
     `storage`           TEXT NOT NULL,
     `status`            CHAR(16) NOT NULL DEFAULT '',  -- pending, running, success, failure
-    `state`             TEXT NOT NULL, -- json format
+    `state`             TEXT NOT NULL,
     -- `job_created_at`    TIMESTAMP NOT NULL, -- TODO
     `running_cnt`       INT(11) NOT NULL DEFAULT 0,
     `started_at`        TIMESTAMP DEFAULT NULL,
@@ -65,9 +65,10 @@ CREATE TABLE flow_task (
     `flow_id`           BIGINT(11)  NOT NULL,
     `name`              CHAR(32) NOT NULL default '',
     `status`            CHAR(16) NOT NULL DEFAULT '',  -- pending, running, success, failure
-    `error_msg`         TEXT DEFAULT NULL, -- TODO task execution failed error message
+    `error_msg`         TEXT DEFAULT NULL,
     `started_at`        TIMESTAMP DEFAULT NULL,
     `ended_at`          TIMESTAMP DEFAULT NULL,
+    `executed`          TINYINT(1) NOT NULL DEFAULT 0,
     UNIQUE KEY `idx_flow_task` (`flow_id`, `name`),
     PRIMARY KEY (`id`)
 )

@@ -46,9 +46,6 @@ internal data type converting path
 
 == TODO
 
-
-* more information like created time, description etc.
-* executor error detail **
 * query job flow status in runtime
 * Runtime name(id) must be protected by lock. the runtime bootstraps with name has registered should be panic.
 * use log: github.com/uber-go/zap **

@@ -7,11 +7,11 @@ type DAGFlowTask struct {
 	Heads []*taskNode
 }
 
-func (d *DAGFlowTask) Prepare(state *FlowInternalState) {
+func (d *DAGFlowTask) Prepare(state *FlowExecPlanState) {
 	panic("implement me")
 }
 
-func (d *DAGFlowTask) Restore(state *FlowInternalState) error {
+func (d *DAGFlowTask) Restore(state *FlowExecPlanState) error {
 	panic("implement me")
 }
 

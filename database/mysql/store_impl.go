@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"git.code.oa.com/tke/theflow/database"
+	"git.code.oa.com/tke/theflow/util"
 )
 
 type mysqlStore struct {
@@ -90,7 +91,7 @@ func (ms *mysqlStore) CreatePendingFlow(
 	return tx.Commit()
 }
 
-func (ms *mysqlStore) UpdateFlowAtomic(ctx context.Context, obj database.FlowDataObject, agentName string, hasFinished bool) error {
+func (ms *mysqlStore) UpdateFlow(ctx context.Context, obj database.FlowDataObject, agentName string, hasFinished bool) error {
 	tx, err := ms.db.Begin()
 	if err != nil {
 		return err
@@ -131,16 +132,19 @@ func (ms *mysqlStore) SaveFlowStorage(ctx context.Context, flowId int64, data []
 	return tx.Commit()
 }
 
-func (ms *mysqlStore) SaveFlowTask(ctx context.Context, flowId int64, taskName string, status database.TypeStatusRaw) error {
+// flowId int64, taskName string, status TypeStatusRaw)
+func (ms *mysqlStore) UpdateFlowTask(ctx context.Context, data database.TaskDataObject, opts util.BitMask) error {
 	tx, err := ms.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	//TODO update status, error_msg, ended_at
-	upsertSql := "INSERT INTO flow_task (flow_id, name, status) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE status=? "
-	_, err = tx.ExecContext(ctx, upsertSql, flowId, taskName, status, status)
+	upsertSql := "INSERT INTO flow_task (`flow_id`, `name`, `status`) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE `status`=? "
+	if opts.Has(util.TaskUpdateExecuted) {
+		upsertSql += ", `executed` = 1"
+	}
+	_, err = tx.ExecContext(ctx, upsertSql, data.FlowID, data.Name, data.Status, data.Status)
 	if err != nil {
 		return err
 	}

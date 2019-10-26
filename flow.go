@@ -5,63 +5,34 @@ import (
 	"git.code.oa.com/tke/theflow/database"
 )
 
-type Status database.TypeStatusRaw
-
-const (
-	StatusPending Status = iota + 1
-	StatusRunning
-	StatusFailure
-	StatusSuccess
-)
-
-func (s Status) Raw() database.TypeStatusRaw {
-	return database.TypeStatusRaw(s)
-}
-
-func StatusFromRaw(s database.TypeStatusRaw) Status {
-	return Status(s)
-}
-
-type JobMeta struct {
-	id     int64 //must be total order
-	uuid   string
-	UserID string
-	class  FlowClass
-	data   []byte
-}
-
-func (jm *JobMeta) GetOffset() int64 {
-	return jm.id
-}
-
-func (jm *JobMeta) GetUUID() string {
-	return jm.uuid
-}
-
 type Flow struct {
-	flowId            int64
-	uid               string
-	scheme            *FlowScheme
-	orchestration     TaskOrchestration
-	status            Status
-	storage           interface{}
-	state             *FlowInternalState
-	hasFinished       bool
-	runningCnt        int
-	startedAtHasSaved bool
+	FlowRuntimeState
+	flowId        int64
+	uid           string
+	scheme        *FlowScheme
+	orchestration TaskOrchestration
+	state         *FlowExecPlanState
+	stash         FlowRuntimeState
 }
 
-//should be called in spawn main loop only
-func (j *Flow) persist(ctx context.Context, store RuntimeStore) error {
+func (f *Flow) confirmChange() {
+	stash := &f.stash
+	f.status = stash.status
+	f.storage = stash.storage
+	f.hasFinished = stash.hasFinished
+	f.runningCnt = stash.runningCnt
+}
+
+func (f *Flow) persist(ctx context.Context, store RuntimeStore) error {
 	//basic
 	//status
 	//data
 	//state
-	storage, err := serializeStorage(j.storage)
+	storage, err := serializeStorage(f.storage)
 	if err != nil {
 		return err
 	}
-	state, err := serializeInternalState(j.state)
+	state, err := serializePlanState(f.state)
 	if err != nil {
 		return err
 	}
@@ -69,90 +40,32 @@ func (j *Flow) persist(ctx context.Context, store RuntimeStore) error {
 	//TODO started_at, ended_at, error_msg...
 	obj := database.FlowDataObject{
 		FlowDataPartial: database.FlowDataPartial{
-			Status:  j.status.Raw(),
+			Status:  f.status.Raw(),
 			Storage: storage,
 			State:   state,
 		},
-		ID:         j.flowId,
-		RunningCnt: j.runningCnt,
+		ID:         f.flowId,
+		RunningCnt: f.runningCnt,
 	}
 
-	saveStartTimeFlag := false
-	if j.runningCnt == 1 && !j.startedAtHasSaved {
-		saveStartTimeFlag = true
-	}
 	agentName := ctx.Value(contextAgentNameKey).(string)
-	err = store.UpdateFlowAtomic(ctx, obj, agentName, j.hasFinished)
-	if err != nil {
-		j.startedAtHasSaved = saveStartTimeFlag
-	}
+	err = store.UpdateFlow(ctx, obj, agentName, f.hasFinished)
 
 	return err
 }
 
-func (j *Flow) persistTask(ctx context.Context, store RuntimeStore, t *Task) error {
-	//TODO started_at, ended_at, error_msg...
-	return store.SaveFlowTask(ctx, j.flowId, t.name, t.status.Raw())
+func (f *Flow) setStatus(status Status) {
+	f.stash.hasFinished = status == StatusFailure || status == StatusSuccess
+	f.stash.status = status
 }
 
-func (j *Flow) setStatus(status Status) {
-	if status == StatusRunning {
-		if j.status == StatusPending {
-			//first running
-			j.runningCnt = 1
-		} else {
-			j.runningCnt += 1
-		}
-	}
-
-	j.hasFinished = status == StatusFailure || status == StatusSuccess
-	j.status = status
-}
-
-func (j *Flow) updateSpawnedTasks(updatingTasks []*Task) {
+func (f *Flow) updateSpawnedTasks(updatingTasks []*Task) {
 	for _, task := range updatingTasks {
-		if _, ok := j.state.SpawnedTasks[task.name]; !ok {
-			j.state.SpawnedTasks[task.name] = task
+		if _, ok := f.state.SpawnedTasks[task.name]; !ok {
+			f.state.SpawnedTasks[task.name] = task
 		}
 	}
-	j.orchestration.Update(updatingTasks)
-}
-
-type Task struct {
-	name   string
-	status Status
-	scheme *TaskScheme
-}
-
-func newTask(name string, status Status) *Task {
-	return &Task{
-		status: status,
-		name:   name,
-		scheme: nil,
-	}
-}
-
-func (t *Task) setStatus(status Status) {
-	t.status = status
-}
-
-func (t *Task) setScheme(scheme *TaskScheme) {
-	t.scheme = scheme
-}
-
-func (t *Task) persist() {
-
-}
-
-type FlowInternalState struct {
-	SpawnedTasks map[string]*Task //TODO sync.map
-	Error        error
-}
-
-func NewFlowInternalState() *FlowInternalState {
-	return &FlowInternalState{
-		SpawnedTasks: make(map[string]*Task, 0),
-	}
+	f.orchestration.Update(updatingTasks)
 }
 
 func newFlow(dbFlowObj database.FlowDataObject) (*Flow, error) {
@@ -168,22 +81,26 @@ func newFlow(dbFlowObj database.FlowDataObject) (*Flow, error) {
 	}
 
 	orchestration := scheme.NewOrchestration()
-	state := NewFlowInternalState()
+	state := NewFlowExecPlanState()
 
-	if err = deserializeInternalState(dbFlowObj.State, state); err != nil {
+	if err = deserializePlanState(dbFlowObj.State, state); err != nil {
 		return nil, err
 	}
 
-	j := &Flow{
-		flowId:            dbFlowObj.ID,
-		uid:               dbFlowObj.UserID,
-		status:            StatusFromRaw(dbFlowObj.Status),
-		state:             state,
-		scheme:            scheme,
-		storage:           storage,
-		orchestration:     orchestration,
-		runningCnt:        dbFlowObj.RunningCnt,
-		startedAtHasSaved: dbFlowObj.RunningCnt > 0,
+	runtimeState := FlowRuntimeState{
+		status:     StatusFromRaw(dbFlowObj.Status),
+		storage:    storage,
+		runningCnt: dbFlowObj.RunningCnt,
 	}
-	return j, nil
+
+	f := &Flow{
+		FlowRuntimeState: runtimeState,
+		flowId:           dbFlowObj.ID,
+		uid:              dbFlowObj.UserID,
+		state:            state,
+		scheme:           scheme,
+		orchestration:    orchestration,
+		stash:            runtimeState.Clone(),
+	}
+	return f, nil
 }

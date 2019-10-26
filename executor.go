@@ -2,11 +2,12 @@ package theflow
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"git.code.oa.com/tke/theflow/database"
+	"git.code.oa.com/tke/theflow/util"
 	"go.uber.org/atomic"
 	"log"
-	"strings"
 	"sync"
 )
 
@@ -17,74 +18,28 @@ const (
 
 type RuntimeStore = database.RuntimeStore
 
-type multiErrors struct {
-	errors []error
-}
-
-//TODO structure error
-func (m multiErrors) Error() string {
-	errMessage := make([]string, 0)
-	for _, err := range m.errors {
-		errMessage = append(errMessage, err.Error())
-	}
-	return "multi error: " + strings.Join(errMessage, "\n")
-}
-
-var _ error = multiErrors{}
-
-type internalError struct {
+type RetryableError struct {
 	err error
 }
 
-func newInternalError(err error) internalError {
-	return internalError{err: err}
+func (e RetryableError) Error() string {
+	return fmt.Sprintf("an error has occurred that can be retried: %v", e.Error())
 }
 
-func (i internalError) Error() string {
-	return "internal error: " + i.err.Error()
+func (e RetryableError) Origin() error {
+	return e.err
 }
-
-type processError struct {
-	err error
-}
-
-func newProcessError(err error) processError {
-	return processError{err: err}
-}
-
-func (p processError) Error() string {
-	return "process error: " + p.err.Error()
-}
-
-var _ error = internalError{}
-var _ error = processError{}
-
-//Exceeding the maximum limit
-type ExceedLimitError struct {
-	user    string
-	trigger string
-}
-
-func (e ExceedLimitError) Error() string {
-	return fmt.Sprintf(
-		"the user=%s maximum parallel limit is overflow when checking to execute flow: %s",
-		e.user, e.trigger)
-}
-
-var _ error = ExceedLimitError{}
 
 type taskErrorSanitation struct {
 	hasError       *atomic.Bool
-	businessErrors sync.Map
+	errors         sync.Map
 	internalErrors sync.Map
 }
 
 func newTasksErrorSanitation() *taskErrorSanitation {
-
 	return &taskErrorSanitation{
-		hasError:       atomic.NewBool(false),
-		businessErrors: sync.Map{},
-		internalErrors: sync.Map{},
+		hasError: atomic.NewBool(false),
+		errors:   sync.Map{},
 	}
 }
 
@@ -93,40 +48,12 @@ func (tes *taskErrorSanitation) HasError() bool {
 }
 
 func (tes *taskErrorSanitation) Errors(name string) error {
-	/*
-		var err error
-		taskErrors := make([]error, 0)
-		for _, task := range partialTasks {
-			if err, ok := processErrors.Load(name); ok {
-				taskErrors = append(taskErrors, err.(processError))
-			} else if err, ok := internalErrors.Load(name); ok {
-				taskErrors = append(taskErrors, err.(internalError))
-			} else {
-				// this task has no error
-			}
-		}
-
-		if len(taskErrors) == 0 {
-			panic("!unreachable")
-		}
-
-		if len(taskErrors) == 1 {
-			err = taskErrors[0]
-		}
-	*/
-
 	return nil
-
 }
 
-func (tes *taskErrorSanitation) AddBusinessError(taskName string, err error) {
+func (tes *taskErrorSanitation) AddError(taskName string, err error) {
 	tes.hasError.Store(true)
-	tes.businessErrors.Store(taskName, newProcessError(err))
-}
-
-func (tes *taskErrorSanitation) AddInternalError(taskName string, err error) {
-	tes.hasError.Store(true)
-	tes.internalErrors.Store(taskName, newInternalError(err))
+	tes.errors.Store(taskName, err)
 }
 
 type Executor struct {
@@ -135,41 +62,69 @@ type Executor struct {
 	notifyAgent *NotificationAgent
 }
 
-//task.setStatus(StatusPending)
-func (exc *Executor) runTask(
-	ctx context.Context,
-	f *Flow,
-	task *Task,
-	wg *sync.WaitGroup,
-	tes *taskErrorSanitation,
-) {
-
-	defer func() {
-		wg.Done()
-		p := recover()
-		if p != nil {
-			bizErr := fmt.Errorf("task panic: %v", p)
-			tes.AddBusinessError(task.scheme.Name, bizErr)
+func (exc *Executor) dealTaskRunning(ctx context.Context, f *Flow, t *Task) error {
+	if !t.executed {
+		// task can't be resumed from intermediate state
+		t.setHasBeenExecuted()
+		if err := t.persist(ctx, exc.store, f.flowId, util.TaskUpdateExecuted); err != nil {
+			return RetryableError{err}
 		}
 
-		_ = f.persistTask(ctx, exc.store, task)
-	}()
+		flowContext := NewContext(ctx, exc.store, f, t)
+		var taskError error
+		func() {
+			defer func() {
+				if p := recover(); p != nil {
+					taskError = fmt.Errorf("task panic: %v", p)
+				}
+			}()
+			taskError = t.scheme.Task.Execute(flowContext)
+		}()
 
-	task.setStatus(StatusRunning)
-	/*
-		err := f.persistTask(ctx, exc.store, task)
+		if taskError != nil {
+			t.setStatus(StatusFailure)
+			t.setError(taskError)
+			return t.persist(ctx, exc.store, f.flowId, util.TaskUpdateError)
+		} else {
+			t.setStatus(StatusRunning)
+			return t.persist(ctx, exc.store, f.flowId, util.TaskUpdateDefault)
+		}
+	} else {
+		t.setStatus(StatusFailure)
+		t.setError(errors.New("task was terminated unexpectedly"))
+		err := t.persist(ctx, exc.store, f.flowId, util.TaskUpdateError)
 		if err != nil {
-			tes.AddInternalError(task.name, err)
-			return
+			return RetryableError{err}
 		}
+		return nil
+	}
+}
 
-	*/
+func (exc *Executor) runTask(ctx context.Context, f *Flow, t *Task) error {
 
-	flowContext := NewContext(ctx, exc.store, f, task)
-	// task can't be resumed from intermediate state
-	if err := task.scheme.Task.Execute(flowContext); err != nil {
-		tes.AddBusinessError(task.name, err)
-		return
+	for {
+		switch t.status {
+		case StatusPending:
+			t.setStatus(StatusRunning)
+			if err := t.persist(ctx, exc.store, f.flowId, util.TaskUpdateDefault); err != nil {
+				return RetryableError{err}
+			}
+			continue
+		case StatusRunning:
+			err := exc.dealTaskRunning(ctx, f, t)
+			if err != nil {
+				return err
+			}
+			continue
+		case StatusFailure:
+			//if !task.executed
+			//XXX we can send notification here
+			return nil
+		case StatusSuccess:
+			//if !task.executed
+			//XXX we can send notification here
+			return nil
+		}
 	}
 }
 
@@ -190,9 +145,10 @@ func (exc *Executor) dealRunning(ctx context.Context, f *Flow) error {
 		partialTasks := orchestration.Next()
 		if partialTasks == nil {
 			f.setStatus(StatusSuccess)
-			//TODO setEndedAt
 			return f.persist(ctx, store)
 		}
+
+		f.updateSpawnedTasks(partialTasks)
 
 		tes := newTasksErrorSanitation()
 
@@ -200,7 +156,15 @@ func (exc *Executor) dealRunning(ctx context.Context, f *Flow) error {
 		wg.Add(len(partialTasks))
 		for _, task := range partialTasks {
 			go func(task *Task) {
-				exc.runTask(ctx, f, task, wg, tes)
+				defer wg.Done()
+				taskRunErr := exc.runTask(ctx, f, task)
+				if err, ok := taskRunErr.(RetryableError); ok {
+					originErr := err.Origin()
+					tes.AddError(task.name, originErr)
+					return
+				} else {
+					tes.AddError(task.name, taskRunErr)
+				}
 			}(task)
 		}
 		wg.Wait()
@@ -225,23 +189,13 @@ func (exc *Executor) spawn(ctx context.Context, f *Flow) error {
 	for {
 		switch f.status {
 		case StatusPending:
-			if err := exc.dealPending(ctx, f); err != nil {
-				return err
-			}
+			return exc.dealPending(ctx, f)
 		case StatusRunning:
-			if err := exc.dealRunning(ctx, f); err != nil {
-				return err
-			}
+			return exc.dealRunning(ctx, f)
 		case StatusFailure:
-			if err := exc.dealFailure(ctx, f); err != nil {
-				return err
-			}
-			return nil
+			return exc.dealFailure(ctx, f)
 		case StatusSuccess:
-			if err := exc.dealSuccess(ctx, f); err != nil {
-				return err
-			}
-			return nil
+			return exc.dealSuccess(ctx, f)
 		default:
 			panic("unknown flow status")
 		}
