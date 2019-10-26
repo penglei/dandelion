@@ -30,14 +30,17 @@ func (t *Task) setHasBeenExecuted() {
 	t.executed = true
 }
 
-func (t *Task) persistTask(ctx context.Context, store RuntimeStore, flowId int64, opts util.BitMask) error {
+func (t *Task) persistTask(ctx context.Context, store RuntimeStore, flowId int64, mask util.BitMask) error {
 	taskData := database.TaskDataObject{
-		FlowID:   flowId,
-		Name:     t.name,
-		Status:   t.status.Raw(),
-		ErrorMsg: t.err.Error(),
+		FlowID: flowId,
+		Name:   t.name,
+		Status: t.status.Raw(),
 	}
-	return store.UpdateFlowTask(ctx, taskData, opts)
+	if mask.Has(util.TaskSetError) {
+		taskData.ErrorMsg = t.err.Error()
+	}
+
+	return store.UpsertFlowTask(ctx, taskData, mask)
 }
 
 func newTask(name string, status Status) *Task {

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"git.code.oa.com/tke/theflow"
 	"github.com/pborman/uuid"
 	"log"
@@ -59,7 +58,9 @@ func NewFakeK8sService() fakeK8sService {
 }
 
 func (f fakeK8sService) GetCluster(name string) string {
-	return "fake: " + name
+	clusterName := "fake: " + name
+	log.Printf("Calling K8sService GetCluster: %s --> %s\n", name, clusterName)
+	return clusterName
 }
 
 var _ K8sService = &fakeK8sService{}
@@ -70,20 +71,20 @@ type meshInstallJob struct {
 }
 
 func (mj *meshInstallJob) FirstTask(ctx Context) error {
-	meshName := "mesh-" + uuid.New()
-	log.Println("first task running: " + meshName)
 	storage := ctx.Global().(*InstallMeshStorage)
+	meshName := "mesh-" + uuid.New()
 	storage.MeshName = meshName
-	log.Printf("FirstTask read job data: %v", mj.Data)
+	log.Printf("FirstTask running, storage: %v, data: %v \n", storage, mj.Data)
 	mj.Data.Bar = 456
+	log.Printf("FirstTask set data: %v", mj.Data)
+	panic("FirstTask panic!")
 	time.Sleep(time.Second * 2)
 	return ctx.Save()
 }
 
 func (mj *meshInstallJob) SecondTask(ctx Context) error {
 	storage := ctx.Global().(*InstallMeshStorage)
-	log.Printf("run second task, istio: %s\n", storage.MeshName)
-	log.Printf("SecondTask read job data: %v", mj.Data)
-	log.Printf("calling K8sService GetCluster result: %s\n", mj.K8sSvc.GetCluster(storage.MeshName))
-	return fmt.Errorf("custom error in second")
+	log.Printf("SecondTask running, storage: %v, data: %v\n", storage, mj.Data)
+	mj.K8sSvc.GetCluster(storage.MeshName)
+	return nil //fmt.Errorf("custom error in second")
 }

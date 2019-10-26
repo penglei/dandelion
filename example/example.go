@@ -46,13 +46,18 @@ func main() {
 		panic(err)
 	}
 
-	user := "user_local"
-	meshStorage := InstallMeshStorage{
-		MeshTitle: "test_mesh_installing",
-	}
-	err = flowRuntime.CreateJob(ctx, user, FlowClassInstall, meshStorage)
-	if err != nil {
-		panic(err)
+	createNewJob := true
+	//createNewJob = false
+
+	if createNewJob {
+		user := "user_local"
+		meshStorage := InstallMeshStorage{
+			MeshTitle: "test_mesh_installing",
+		}
+		err = flowRuntime.CreateJob(ctx, user, FlowClassInstall, meshStorage)
+		if err != nil {
+			panic(err)
+		}
 	}
 
 	stopCh := make(chan struct{})

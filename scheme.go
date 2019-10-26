@@ -18,9 +18,11 @@ type FlowScheme struct {
 	NewStorage func() interface{}
 	Tasks      func() TaskOrchestration
 	//TODO
-	OnRunning  func(Context) //call before entering running status
-	OnCreating func(Context) //first running
-	OnResuming func(Context) //each of resume running
+	//OnRunning  func(Context) //call before entering running status
+	//OnCreating func(Context) //first running
+	//OnResuming func(Context) //each of resume running
+	OnSuccess func(Context)
+	OnFailure func(Context)
 }
 
 func (f *FlowScheme) NewOrchestration() TaskOrchestration {

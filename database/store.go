@@ -4,7 +4,6 @@ import (
 	"context"
 	"git.code.oa.com/tke/theflow/util"
 	_ "github.com/go-sql-driver/mysql"
-	"time"
 )
 
 type TypeStatusRaw = int
@@ -33,12 +32,12 @@ type JobMetaObject struct {
 }
 
 type TaskDataObject struct {
-	FlowID    int64
-	Name      string
-	Status    TypeStatusRaw
-	ErrorMsg  string
-	StartedAt *time.Time
-	EndedAt   *time.Time
+	FlowID   int64
+	Name     string
+	Status   TypeStatusRaw
+	ErrorMsg string
+	//StartedAt *time.Time
+	//EndedAt   *time.Time
 }
 
 type RuntimeStore interface {
@@ -46,9 +45,9 @@ type RuntimeStore interface {
 	CreateJobEvent(ctx context.Context, meta *JobMetaObject) error
 	DeleteJobEvent(ctx context.Context, uuid string) error
 	GetOrCreateFlow(context.Context, FlowDataPartial) (FlowDataObject, error)
-	CreatePendingFlow(context.Context, JobMetaObject, TypeStatusRaw, []byte) error
-	UpdateFlow(ctx context.Context, obj FlowDataObject, agentName string, hasFinished bool) error
+	CreatePendingFlow(context.Context, FlowDataPartial) error
+	UpdateFlow(ctx context.Context, obj FlowDataObject, agentName string, mask util.BitMask) error
 	SetFlowStartTime(ctx context.Context, flowId int64) error
 	SaveFlowStorage(ctx context.Context, flowId int64, data []byte) error
-	UpdateFlowTask(ctx context.Context, taskData TaskDataObject, mask util.BitMask) error
+	UpsertFlowTask(ctx context.Context, taskData TaskDataObject, mask util.BitMask) error
 }

@@ -12,35 +12,34 @@ type Context interface {
 	TxSave(func(interface{}) error) error
 }
 
-type taskContext struct {
+type flowContext struct {
 	base  context.Context
 	flow  *Flow
-	task  *Task
 	store RuntimeStore
 }
 
-func (ctx *taskContext) Deadline() (deadline time.Time, ok bool) {
+func (ctx *flowContext) Deadline() (deadline time.Time, ok bool) {
 	return ctx.base.Deadline()
 }
 
-func (ctx *taskContext) Done() <-chan struct{} {
+func (ctx *flowContext) Done() <-chan struct{} {
 	return ctx.base.Done()
 }
 
-func (ctx *taskContext) Err() error {
+func (ctx *flowContext) Err() error {
 	return ctx.base.Err()
 }
 
-func (ctx *taskContext) Value(key interface{}) interface{} {
+func (ctx *flowContext) Value(key interface{}) interface{} {
 	return ctx.base.Value(key)
 }
 
-func (ctx *taskContext) Global() interface{} {
+func (ctx *flowContext) Global() interface{} {
 	//TODO log race condition warning
 	return ctx.flow.storage
 }
 
-func (ctx *taskContext) Save() error {
+func (ctx *flowContext) Save() error {
 
 	data, err := serializeStorage(ctx.flow.storage)
 	if err == nil {
@@ -53,17 +52,16 @@ func (ctx *taskContext) Save() error {
 }
 
 //TODO implementation
-func (ctx *taskContext) TxSave(cb func(interface{}) error) error {
+func (ctx *flowContext) TxSave(cb func(interface{}) error) error {
 	return cb(ctx.flow.storage)
 }
 
-var _ Context = &taskContext{}
+var _ Context = &flowContext{}
 
-func NewContext(ctx context.Context, store RuntimeStore, job *Flow, task *Task) Context {
-	return &taskContext{
+func NewFlowContext(ctx context.Context, store RuntimeStore, f *Flow) Context {
+	return &flowContext{
 		base:  ctx,
-		flow:  job,
+		flow:  f,
 		store: store,
-		task:  task,
 	}
 }

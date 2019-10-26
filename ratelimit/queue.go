@@ -30,7 +30,7 @@ func (q *QueuedJobThrottle) MergeInto(queue EventQueue) {
 	q.lastOffset = q.queue.Back().Value.(Event).GetOffset()
 }
 
-func (q *QueuedJobThrottle) CommitFinish(event Event) {
+func (q *QueuedJobThrottle) Commit(event Event) {
 
 	elem := q.queue.Front()
 	front := elem.Value.(Event)

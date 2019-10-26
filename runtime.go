@@ -19,7 +19,7 @@ type EventQueue = ratelimit.EventQueue
 
 const (
 	CheckInterval         = time.Second * 5
-	QueueClassGranularity = "flow_queue"
+	QueueClassGranularity = "job_queue"
 	MaxRetryNum           = 3
 	LockHeartbeat         = time.Second * 3
 )
@@ -73,7 +73,7 @@ func (f *FlowShapingManager) Commit(key string, meta *JobMeta) {
 
 	q, ok := f.sinks[key]
 	if ok {
-		q.CommitFinish(meta)
+		q.Commit(meta)
 	}
 }
 
@@ -151,7 +151,7 @@ func (rt *Runtime) Bootstrap(ctx context.Context) error {
 	}()
 
 	notifyAgent := &NotificationAgent{}
-	notifyAgent.RegisterJobFinish(rt.onJobFinished)
+	notifyAgent.RegisterFlowComplete(rt.onJobComplete)
 
 	for i := 0; i < rt.workerNum; i += 1 {
 		executor := NewExecutor(rt.name, notifyAgent, rt.store)
@@ -177,29 +177,19 @@ func (rt *Runtime) CreateJob(ctx context.Context, uid string, class FlowClass, j
 		Class:  class.Raw(),
 		Data:   data,
 	}
+
 	//save it
 	err = rt.store.CreateJobEvent(ctx, &dbJobMeta)
 	if err != nil {
 		return err
 	}
 
-	//be visible for querying flow as soon as possible
-	if scheme, err := Resolve(class); err != nil {
-		return err
-	} else {
-		orchestration := scheme.NewOrchestration()
-		state := NewFlowExecPlanState()
-		orchestration.Prepare(state)
-		stateBytes, err := serializePlanState(state)
-		if err != nil {
-			return err
-		}
-		err = rt.store.CreatePendingFlow(ctx, dbJobMeta, StatusPending.Raw(), stateBytes)
-		if err != nil {
-			//warning
-			log.Printf("precreate pending job error:%v", err)
-		}
+	//pre-creating pending flow that can be visible for querying as soon as possible
+	err = birthPendingFlow(ctx, rt.store, dbJobMeta.UUID, dbJobMeta.UserID, class, dbJobMeta.Data)
+	if err != nil {
+		log.Printf("precreating pending job error:%v", err)
 	}
+
 	return nil
 }
 
@@ -263,7 +253,7 @@ func (rt *Runtime) onLockManipulatorError(reason error) {
 	//TODO resume all executors
 }
 
-func (rt *Runtime) onJobFinished(target interface{}) {
+func (rt *Runtime) onJobComplete(target interface{}) {
 	meta := target.(*JobMeta)
 	key := rt.getJobQueueName(meta)
 	rt.shapingManager.Commit(key, meta)

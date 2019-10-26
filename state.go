@@ -30,9 +30,8 @@ func NewFlowExecPlanState() *FlowExecPlanState {
 }
 
 type FlowRuntimeState struct {
-	status      Status
-	hasFinished bool
-	runningCnt  int
+	status     Status
+	runningCnt int
 }
 
 func (frs *FlowRuntimeState) Clone() FlowRuntimeState {

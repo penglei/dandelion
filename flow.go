@@ -3,6 +3,7 @@ package theflow
 import (
 	"context"
 	"git.code.oa.com/tke/theflow/database"
+	"git.code.oa.com/tke/theflow/util"
 )
 
 type Flow struct {
@@ -16,18 +17,14 @@ type Flow struct {
 	stash         FlowRuntimeState
 }
 
-func (f *Flow) confirmChange() {
+func (f *Flow) commitStash() {
 	stash := &f.stash
 	f.status = stash.status
-	f.hasFinished = stash.hasFinished
 	f.runningCnt = stash.runningCnt
 }
 
-func (f *Flow) persistFlow(ctx context.Context, store RuntimeStore) error {
-	//basic
-	//status
-	//data
-	//state
+func (f *Flow) persistFlow(ctx context.Context, store RuntimeStore, mask util.BitMask) error {
+	//FlowUpdateDefault: storage, state, status
 	storage, err := serializeStorage(f.storage)
 	if err != nil {
 		return err
@@ -39,25 +36,42 @@ func (f *Flow) persistFlow(ctx context.Context, store RuntimeStore) error {
 
 	obj := database.FlowDataObject{
 		FlowDataPartial: database.FlowDataPartial{
-			Status:  f.status.Raw(),
+			Status:  f.stash.status.Raw(), //read from stash
 			Storage: storage,
 			State:   state,
 		},
 		ID:         f.flowId,
-		RunningCnt: f.runningCnt,
+		RunningCnt: f.stash.runningCnt, //read from stash
 	}
 	agentName := ctx.Value(contextAgentNameKey).(string)
 
-	err = store.UpdateFlow(ctx, obj, agentName, f.hasFinished)
+	err = store.UpdateFlow(ctx, obj, agentName, mask)
 	if err == nil {
-		f.confirmChange()
+		f.commitStash()
 	}
+
+	//maybe reload from store?
 
 	return err
 }
 
+func (f *Flow) persistStartRunningStat(ctx context.Context, store RuntimeStore) error {
+	mask := util.FlowUpdateDefault
+	mask |= util.FlowUpdateRunningCnt
+	if f.runningCnt == 0 { //first running
+		mask |= util.FlowSetStartStat
+	}
+	f.stash.runningCnt += 1
+
+	return f.persistFlow(ctx, store, mask)
+}
+
+func (f *Flow) persistEndRunningStat(ctx context.Context, store database.RuntimeStore) error {
+	err := f.persistFlow(ctx, store, util.FlowUpdateDefault|util.FlowSetCompleteStat)
+	return err
+}
+
 func (f *Flow) setStatus(status Status) {
-	f.stash.hasFinished = status == StatusFailure || status == StatusSuccess
 	f.stash.status = status
 }
 
@@ -105,4 +119,47 @@ func newFlow(dbFlowObj database.FlowDataObject) (*Flow, error) {
 		stash:            runtimeState.Clone(),
 	}
 	return f, nil
+}
+
+func newPendingFlowData(
+	uuid,
+	uid string,
+	class FlowClass,
+	storage []byte,
+) (*database.FlowDataPartial, error) {
+	scheme, err := Resolve(class)
+	if err != nil {
+		return nil, err
+	}
+	orchestration := scheme.NewOrchestration()
+	state := NewFlowExecPlanState()
+	orchestration.Prepare(state)
+	stateBytes, err := serializePlanState(state)
+	if err != nil {
+		return nil, err
+	}
+	dbFlowDataPartial := &database.FlowDataPartial{
+		EventUUID: uuid,
+		UserID:    uid,
+		Class:     class.Raw(),
+		Status:    StatusPending.Raw(),
+		Storage:   storage,
+		State:     stateBytes,
+	}
+	return dbFlowDataPartial, nil
+}
+
+func birthPendingFlow(ctx context.Context,
+	store database.RuntimeStore,
+	uuid,
+	uid string,
+	class FlowClass,
+	storage []byte,
+) error {
+	dbFlowDataPartial, err := newPendingFlowData(uuid, uid, class, storage)
+	if err != nil {
+		return err
+	}
+	err = store.CreatePendingFlow(ctx, *dbFlowDataPartial)
+	return err
 }

@@ -4,6 +4,7 @@ import (
 	"errors"
 )
 
+//ChainedFlowTasks creates a chain of tasks to be processed one by one
 type ChainedFlowTasks struct {
 	nextIndex   int     //running task nextIndex cursor
 	tasks       []*Task //spawned tasks

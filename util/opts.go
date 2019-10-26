@@ -2,6 +2,14 @@ package util
 
 const (
 	TaskUpdateDefault BitMask = 1 << BitMask(iota)
-	TaskUpdateExecuted
-	TaskUpdateError
+	TaskSetExecuted
+	TaskSetError
+	TaskSetFinishStat
+)
+
+const (
+	FlowUpdateDefault BitMask = 1 << BitMask(iota)
+	FlowSetStartStat
+	FlowUpdateRunningCnt
+	FlowSetCompleteStat
 )

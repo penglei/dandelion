@@ -51,9 +51,8 @@ CREATE TABLE flow (
     `ended_at`          TIMESTAMP DEFAULT NULL,
     `agent_name`        CHAR(16) NOT NULL DEFAULT '', -- the last agent which executes flow task
     `created_at`        TIMESTAMP NOT NULL DEFAULT NOW(),
-    `updated_at`        TIMESTAMP NOT NULL DEFAULT now() ON UPDATE NOW(),
     `deleted_at`        TIMESTAMP DEFAULT NULL,
-    `deleted_flag`      BIGINT(11)  NOT NULL DEFAULT 0,
+    `deleted_flag`      BIGINT(11)  NOT NULL DEFAULT 0, -- TODO not implement
     UNIQUE KEY `idx_job_event_uuid` (`event_uuid`),
     PRIMARY KEY (`id`)
 )
@@ -65,7 +64,7 @@ CREATE TABLE flow_task (
     `flow_id`           BIGINT(11)  NOT NULL,
     `name`              CHAR(32) NOT NULL default '',
     `status`            CHAR(16) NOT NULL DEFAULT '',  -- pending, running, success, failure
-    `error_msg`         TEXT DEFAULT NULL,
+    `error`             TEXT DEFAULT NULL,
     `started_at`        TIMESTAMP DEFAULT NULL,
     `ended_at`          TIMESTAMP DEFAULT NULL,
     `executed`          TINYINT(1) NOT NULL DEFAULT 0,

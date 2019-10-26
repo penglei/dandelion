@@ -6,7 +6,7 @@ type EventQueue = *list.List
 
 type FlowShaping interface {
 	MergeInto(EventQueue)
-	CommitFinish(Event)
+	Commit(Event)
 	PickOut() []Event
 }
 

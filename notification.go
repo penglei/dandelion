@@ -1,15 +1,15 @@
 package theflow
 
 type NotificationAgent struct {
-	flowFinishedCallbacks []func(interface{})
+	flowCompleteCallbacks []func(interface{})
 }
 
-func (e *NotificationAgent) TriggerFlowFinished(meta interface{}) {
-	for _, cb := range e.flowFinishedCallbacks {
+func (e *NotificationAgent) TriggerFlowComplete(meta interface{}) {
+	for _, cb := range e.flowCompleteCallbacks {
 		cb(meta)
 	}
 }
 
-func (e *NotificationAgent) RegisterJobFinish(cb func(meta interface{})) {
-	e.flowFinishedCallbacks = append(e.flowFinishedCallbacks, cb)
+func (e *NotificationAgent) RegisterFlowComplete(cb func(meta interface{})) {
+	e.flowCompleteCallbacks = append(e.flowCompleteCallbacks, cb)
 }

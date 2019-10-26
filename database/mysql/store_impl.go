@@ -68,22 +68,13 @@ func createPendingJobFlow(ctx context.Context, tx *sql.Tx, data *database.FlowDa
 
 func (ms *mysqlStore) CreatePendingFlow(
 	ctx context.Context,
-	dbJobMeta database.JobMetaObject,
-	status database.TypeStatusRaw,
-	state []byte) error {
+	data database.FlowDataPartial,
+) error {
 	tx, err := ms.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	data := database.FlowDataPartial{
-		EventUUID: dbJobMeta.UUID,
-		UserID:    dbJobMeta.UserID,
-		Class:     dbJobMeta.Class,
-		Status:    status,
-		Storage:   dbJobMeta.Data,
-		State:     state,
-	}
 	_, err = createPendingJobFlow(ctx, tx, &data)
 	if err != nil {
 		return err
@@ -91,25 +82,33 @@ func (ms *mysqlStore) CreatePendingFlow(
 	return tx.Commit()
 }
 
-func (ms *mysqlStore) UpdateFlow(ctx context.Context, obj database.FlowDataObject, agentName string, hasFinished bool) error {
+func (ms *mysqlStore) UpdateFlow(ctx context.Context, obj database.FlowDataObject, agentName string, mask util.BitMask) error {
 	tx, err := ms.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	updateFieldsSql := "`status` = ?, `state` = ?, `storage` = ?, `agent_name` = ?, `running_cnt` = ?"
+	updateFieldsSql := "`status` = ?, `state` = ?, `storage` = ?, `agent_name` = ?"
+	sqlArgs := []interface{}{obj.Status, obj.State, obj.Storage, agentName}
 
-	if hasFinished {
-		updateFieldsSql += ", `ended_at` = NOW()"
-	}
-	if obj.RunningCnt == 1 {
+	if mask.Has(util.FlowSetStartStat) {
 		updateFieldsSql += ", `started_at` = NOW()"
 	}
 
-	updateSql := fmt.Sprintf("UPDATE flow SET %s WHERE id = ?", updateFieldsSql)
+	if mask.Has(util.FlowUpdateRunningCnt) {
+		updateFieldsSql += ", `running_cnt` = ?"
+		sqlArgs = append(sqlArgs, obj.RunningCnt)
+	}
 
-	_, err = tx.ExecContext(ctx, updateSql, obj.Status, obj.State, obj.Storage, agentName, obj.RunningCnt, obj.ID)
+	if mask.Has(util.FlowSetCompleteStat) {
+		updateFieldsSql += ", `ended_at` = NOW()"
+	}
+
+	updateSql := fmt.Sprintf("UPDATE flow SET %s WHERE id = ?", updateFieldsSql)
+	sqlArgs = append(sqlArgs, obj.ID)
+
+	_, err = tx.ExecContext(ctx, updateSql, sqlArgs...)
 	if err != nil {
 		return err
 	}
@@ -133,18 +132,51 @@ func (ms *mysqlStore) SaveFlowStorage(ctx context.Context, flowId int64, data []
 }
 
 // flowId int64, taskName string, status TypeStatusRaw)
-func (ms *mysqlStore) UpdateFlowTask(ctx context.Context, data database.TaskDataObject, opts util.BitMask) error {
+func (ms *mysqlStore) UpsertFlowTask(ctx context.Context, data database.TaskDataObject, opts util.BitMask) error {
 	tx, err := ms.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	upsertSql := "INSERT INTO flow_task (`flow_id`, `name`, `status`) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE `status`=? "
-	if opts.Has(util.TaskUpdateExecuted) {
-		upsertSql += ", `executed` = 1"
+	//{insert
+	insertFieldsSql := "`flow_id`, `name`, `status`"
+	insertFieldsSqlPlaceHolder := "?, ?, ?"
+	sqlArgs := []interface{}{data.FlowID, data.Name, data.Status}
+
+	if opts.Has(util.TaskSetError) {
+		insertFieldsSql += ", `error`"
+		insertFieldsSqlPlaceHolder += ", ?"
+		sqlArgs = append(sqlArgs, data.ErrorMsg)
 	}
-	_, err = tx.ExecContext(ctx, upsertSql, data.FlowID, data.Name, data.Status, data.Status)
+	//}
+
+	//{update
+	updateFieldsSql := "`status`=? "
+	sqlArgs = append(sqlArgs, data.Status)
+
+	if opts.Has(util.TaskSetExecuted) {
+		updateFieldsSql += ", `started_at` = NOW(), `executed` = 1"
+	}
+
+	if opts.Has(util.TaskSetError) {
+		updateFieldsSql += ", `error` = ?"
+		sqlArgs = append(sqlArgs, data.ErrorMsg)
+	}
+
+	if opts.Has(util.TaskSetFinishStat) {
+		updateFieldsSql += ", `ended_at` = NOW()"
+	}
+	//}
+
+	upsertSql := fmt.Sprintf(
+		"INSERT INTO flow_task (%s) VALUES (%s) ON DUPLICATE KEY UPDATE %s",
+		insertFieldsSql,
+		insertFieldsSqlPlaceHolder,
+		updateFieldsSql,
+	)
+
+	_, err = tx.ExecContext(ctx, upsertSql, sqlArgs...)
 	if err != nil {
 		return err
 	}
