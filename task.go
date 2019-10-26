@@ -14,6 +14,10 @@ type Task struct {
 	executed bool
 }
 
+func (t *Task) setScheme(scheme *TaskScheme) {
+	t.scheme = scheme
+}
+
 func (t *Task) setError(err error) {
 	t.err = err
 }
@@ -26,11 +30,7 @@ func (t *Task) setHasBeenExecuted() {
 	t.executed = true
 }
 
-func (t *Task) setScheme(scheme *TaskScheme) {
-	t.scheme = scheme
-}
-
-func (t *Task) persist(ctx context.Context, store RuntimeStore, flowId int64, opts util.BitMask) error {
+func (t *Task) persistTask(ctx context.Context, store RuntimeStore, flowId int64, opts util.BitMask) error {
 	taskData := database.TaskDataObject{
 		FlowID:   flowId,
 		Name:     t.name,

@@ -66,7 +66,7 @@ func (exc *Executor) dealTaskRunning(ctx context.Context, f *Flow, t *Task) erro
 	if !t.executed {
 		// task can't be resumed from intermediate state
 		t.setHasBeenExecuted()
-		if err := t.persist(ctx, exc.store, f.flowId, util.TaskUpdateExecuted); err != nil {
+		if err := t.persistTask(ctx, exc.store, f.flowId, util.TaskUpdateExecuted); err != nil {
 			return RetryableError{err}
 		}
 
@@ -84,15 +84,15 @@ func (exc *Executor) dealTaskRunning(ctx context.Context, f *Flow, t *Task) erro
 		if taskError != nil {
 			t.setStatus(StatusFailure)
 			t.setError(taskError)
-			return t.persist(ctx, exc.store, f.flowId, util.TaskUpdateError)
+			return t.persistTask(ctx, exc.store, f.flowId, util.TaskUpdateError)
 		} else {
 			t.setStatus(StatusRunning)
-			return t.persist(ctx, exc.store, f.flowId, util.TaskUpdateDefault)
+			return t.persistTask(ctx, exc.store, f.flowId, util.TaskUpdateDefault)
 		}
 	} else {
 		t.setStatus(StatusFailure)
 		t.setError(errors.New("task was terminated unexpectedly"))
-		err := t.persist(ctx, exc.store, f.flowId, util.TaskUpdateError)
+		err := t.persistTask(ctx, exc.store, f.flowId, util.TaskUpdateError)
 		if err != nil {
 			return RetryableError{err}
 		}
@@ -106,7 +106,7 @@ func (exc *Executor) runTask(ctx context.Context, f *Flow, t *Task) error {
 		switch t.status {
 		case StatusPending:
 			t.setStatus(StatusRunning)
-			if err := t.persist(ctx, exc.store, f.flowId, util.TaskUpdateDefault); err != nil {
+			if err := t.persistTask(ctx, exc.store, f.flowId, util.TaskUpdateDefault); err != nil {
 				return RetryableError{err}
 			}
 			continue
@@ -131,7 +131,7 @@ func (exc *Executor) runTask(ctx context.Context, f *Flow, t *Task) error {
 func (exc *Executor) dealPending(ctx context.Context, f *Flow) error {
 	f.orchestration.Prepare(f.state)
 	f.setStatus(StatusRunning)
-	return f.persist(ctx, exc.store)
+	return f.persistFlow(ctx, exc.store)
 }
 func (exc *Executor) dealRunning(ctx context.Context, f *Flow) error {
 	orchestration := f.orchestration
@@ -145,7 +145,7 @@ func (exc *Executor) dealRunning(ctx context.Context, f *Flow) error {
 		partialTasks := orchestration.Next()
 		if partialTasks == nil {
 			f.setStatus(StatusSuccess)
-			return f.persist(ctx, store)
+			return f.persistFlow(ctx, store)
 		}
 
 		f.updateSpawnedTasks(partialTasks)
@@ -171,7 +171,7 @@ func (exc *Executor) dealRunning(ctx context.Context, f *Flow) error {
 
 		if tes.HasError() {
 			f.setStatus(StatusFailure)
-			return f.persist(ctx, store)
+			return f.persistFlow(ctx, store)
 		}
 	}
 }

@@ -11,6 +11,7 @@ type Flow struct {
 	uid           string
 	scheme        *FlowScheme
 	orchestration TaskOrchestration
+	storage       interface{}
 	state         *FlowExecPlanState
 	stash         FlowRuntimeState
 }
@@ -18,12 +19,11 @@ type Flow struct {
 func (f *Flow) confirmChange() {
 	stash := &f.stash
 	f.status = stash.status
-	f.storage = stash.storage
 	f.hasFinished = stash.hasFinished
 	f.runningCnt = stash.runningCnt
 }
 
-func (f *Flow) persist(ctx context.Context, store RuntimeStore) error {
+func (f *Flow) persistFlow(ctx context.Context, store RuntimeStore) error {
 	//basic
 	//status
 	//data
@@ -37,7 +37,6 @@ func (f *Flow) persist(ctx context.Context, store RuntimeStore) error {
 		return err
 	}
 
-	//TODO started_at, ended_at, error_msg...
 	obj := database.FlowDataObject{
 		FlowDataPartial: database.FlowDataPartial{
 			Status:  f.status.Raw(),
@@ -47,9 +46,12 @@ func (f *Flow) persist(ctx context.Context, store RuntimeStore) error {
 		ID:         f.flowId,
 		RunningCnt: f.runningCnt,
 	}
-
 	agentName := ctx.Value(contextAgentNameKey).(string)
+
 	err = store.UpdateFlow(ctx, obj, agentName, f.hasFinished)
+	if err == nil {
+		f.confirmChange()
+	}
 
 	return err
 }
@@ -89,7 +91,6 @@ func newFlow(dbFlowObj database.FlowDataObject) (*Flow, error) {
 
 	runtimeState := FlowRuntimeState{
 		status:     StatusFromRaw(dbFlowObj.Status),
-		storage:    storage,
 		runningCnt: dbFlowObj.RunningCnt,
 	}
 
@@ -100,6 +101,7 @@ func newFlow(dbFlowObj database.FlowDataObject) (*Flow, error) {
 		state:            state,
 		scheme:           scheme,
 		orchestration:    orchestration,
+		storage:          storage,
 		stash:            runtimeState.Clone(),
 	}
 	return f, nil

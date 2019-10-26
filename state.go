@@ -31,7 +31,6 @@ func NewFlowExecPlanState() *FlowExecPlanState {
 
 type FlowRuntimeState struct {
 	status      Status
-	storage     interface{}
 	hasFinished bool
 	runningCnt  int
 }

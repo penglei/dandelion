@@ -35,6 +35,30 @@ func (ctx *taskContext) Value(key interface{}) interface{} {
 	return ctx.base.Value(key)
 }
 
+func (ctx *taskContext) Global() interface{} {
+	//TODO log race condition warning
+	return ctx.flow.storage
+}
+
+func (ctx *taskContext) Save() error {
+
+	data, err := serializeStorage(ctx.flow.storage)
+	if err == nil {
+		err = ctx.store.SaveFlowStorage(ctx, ctx.flow.flowId, data)
+	}
+
+	// it needn't to throw out the err.
+	// as flow has cached storage, flow task can continue to run.
+	return nil
+}
+
+//TODO implementation
+func (ctx *taskContext) TxSave(cb func(interface{}) error) error {
+	return cb(ctx.flow.storage)
+}
+
+var _ Context = &taskContext{}
+
 func NewContext(ctx context.Context, store RuntimeStore, job *Flow, task *Task) Context {
 	return &taskContext{
 		base:  ctx,
@@ -43,30 +67,3 @@ func NewContext(ctx context.Context, store RuntimeStore, job *Flow, task *Task) 
 		task:  task,
 	}
 }
-
-func (ctx *taskContext) Global() interface{} {
-	//TODO log race condition warning
-	return ctx.flow.storage
-}
-
-func (ctx *taskContext) Save() error {
-	// it needn't to throw out the err.
-	// as flow has cached storage, flow can continue to run.
-	_ = persistStorage(ctx, ctx.store, ctx.flow)
-	return nil
-}
-
-//TODO
-func (ctx *taskContext) TxSave(cb func(interface{}) error) error {
-	return cb(ctx.flow.storage)
-}
-
-func persistStorage(ctx context.Context, store RuntimeStore, j *Flow) error {
-	data, err := serializeStorage(j.storage)
-	if err != nil {
-		return err
-	}
-	return store.SaveFlowStorage(ctx, j.flowId, data)
-}
-
-var _ Context = &taskContext{}
