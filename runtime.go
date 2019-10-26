@@ -263,7 +263,8 @@ func (rt *Runtime) onLockManipulatorError(reason error) {
 	//TODO resume all executors
 }
 
-func (rt *Runtime) onJobFinished(meta *JobMeta) {
+func (rt *Runtime) onJobFinished(target interface{}) {
+	meta := target.(*JobMeta)
 	key := rt.getJobQueueName(meta)
 	rt.shapingManager.Commit(key, meta)
 

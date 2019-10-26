@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	contextJobMetaKey   = "__job_meta__"
+	contextMetaKey      = "__meta__"
 	contextAgentNameKey = "__agent_name__"
 )
 
@@ -173,10 +173,10 @@ func (exc *Executor) runTask(
 	}
 }
 
-func (exc *Executor) dealPending(ctx context.Context, j *Flow) error {
-	j.orchestration.Prepare(j.state)
-	j.setStatus(StatusRunning)
-	return j.persist(ctx, exc.store)
+func (exc *Executor) dealPending(ctx context.Context, f *Flow) error {
+	f.orchestration.Prepare(f.state)
+	f.setStatus(StatusRunning)
+	return f.persist(ctx, exc.store)
 }
 func (exc *Executor) dealRunning(ctx context.Context, f *Flow) error {
 	orchestration := f.orchestration
@@ -212,33 +212,33 @@ func (exc *Executor) dealRunning(ctx context.Context, f *Flow) error {
 	}
 }
 
-func (exc *Executor) dealFailure(ctx context.Context, j *Flow) error {
-	exc.notifyAgent.TriggerJobFinished(ctx.Value(contextJobMetaKey))
+func (exc *Executor) dealFailure(ctx context.Context, _ *Flow) error {
+	exc.notifyAgent.TriggerFlowFinished(ctx.Value(contextMetaKey))
 	return nil
 }
-func (exc *Executor) dealSuccess(ctx context.Context, j *Flow) error {
-	exc.notifyAgent.TriggerJobFinished(ctx.Value(contextJobMetaKey))
+func (exc *Executor) dealSuccess(ctx context.Context, _ *Flow) error {
+	exc.notifyAgent.TriggerFlowFinished(ctx.Value(contextMetaKey))
 	return nil
 }
 
-func (exc *Executor) spawn(ctx context.Context, j *Flow) error {
+func (exc *Executor) spawn(ctx context.Context, f *Flow) error {
 	for {
-		switch j.status {
+		switch f.status {
 		case StatusPending:
-			if err := exc.dealPending(ctx, j); err != nil {
+			if err := exc.dealPending(ctx, f); err != nil {
 				return err
 			}
 		case StatusRunning:
-			if err := exc.dealRunning(ctx, j); err != nil {
+			if err := exc.dealRunning(ctx, f); err != nil {
 				return err
 			}
 		case StatusFailure:
-			if err := exc.dealFailure(ctx, j); err != nil {
+			if err := exc.dealFailure(ctx, f); err != nil {
 				return err
 			}
 			return nil
 		case StatusSuccess:
-			if err := exc.dealSuccess(ctx, j); err != nil {
+			if err := exc.dealSuccess(ctx, f); err != nil {
 				return err
 			}
 			return nil
@@ -249,7 +249,7 @@ func (exc *Executor) spawn(ctx context.Context, j *Flow) error {
 }
 
 func (exc *Executor) run(ctx context.Context, meta *JobMeta) {
-	ctx = context.WithValue(ctx, contextJobMetaKey, meta)
+	ctx = context.WithValue(ctx, contextMetaKey, meta)
 
 	log.Printf("run flow: %s\n", meta.uuid)
 
