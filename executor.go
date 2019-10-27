@@ -146,6 +146,7 @@ func (exc *Executor) dealTaskRunning(ctx context.Context, f *Flow, t *Task) erro
 }
 
 func (exc *Executor) runTask(ctx context.Context, f *Flow, t *Task) error {
+	var err error
 	for {
 		switch t.status {
 		case StatusPending:
@@ -155,19 +156,11 @@ func (exc *Executor) runTask(ctx context.Context, f *Flow, t *Task) error {
 			}
 			continue
 		case StatusRunning:
-			err := exc.dealTaskRunning(ctx, f, t)
-			if err != nil {
-				return err
-			}
-			continue
+			err = exc.dealTaskRunning(ctx, f, t)
 		case StatusFailure:
-			//if !task.executed
-			//XXX we can send notification here
-			return nil
+			return err
 		case StatusSuccess:
-			//if !task.executed
-			//XXX we can send notification here
-			return nil
+			return err
 		}
 	}
 }
@@ -292,8 +285,9 @@ func (exc *Executor) spawn(ctx context.Context, f *Flow) error {
 				return err
 			}
 		case StatusRunning:
-			if err := exc.dealRunning(ctx, f); err != nil {
-				return err
+			err := exc.dealRunning(ctx, f)
+			if err != nil {
+				log.Printf("flow dealRunning return an error: %v\n", err)
 			}
 		case StatusFailure:
 			return exc.dealFailure(ctx, f)

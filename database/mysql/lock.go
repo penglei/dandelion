@@ -237,6 +237,10 @@ func (m *mysqlLockManipulator) checkLockerConnAndHeartbeat(ctx context.Context) 
 			}
 
 			m.lockersMutex.RLock()
+			if len(m.lockers) == 0 {
+				m.lockersMutex.RUnlock()
+				continue
+			}
 			lockerKeys := make([]string, 0)
 			for key := range m.lockers {
 				lockerKeys = append(lockerKeys, key)
