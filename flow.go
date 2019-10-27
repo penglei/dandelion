@@ -9,7 +9,6 @@ import (
 type Flow struct {
 	FlowRuntimeState
 	flowId        int64
-	uid           string
 	scheme        *FlowScheme
 	orchestration TaskOrchestration
 	storage       interface{}
@@ -111,7 +110,6 @@ func newFlow(dbFlowObj database.FlowDataObject) (*Flow, error) {
 	f := &Flow{
 		FlowRuntimeState: runtimeState,
 		flowId:           dbFlowObj.ID,
-		uid:              dbFlowObj.UserID,
 		state:            state,
 		scheme:           scheme,
 		orchestration:    orchestration,
@@ -123,7 +121,7 @@ func newFlow(dbFlowObj database.FlowDataObject) (*Flow, error) {
 
 func newPendingFlowData(
 	uuid,
-	uid string,
+	user string,
 	class FlowClass,
 	storage []byte,
 ) (*database.FlowDataPartial, error) {
@@ -140,7 +138,7 @@ func newPendingFlowData(
 	}
 	dbFlowDataPartial := &database.FlowDataPartial{
 		EventUUID: uuid,
-		UserID:    uid,
+		UserID:    user,
 		Class:     class.Raw(),
 		Status:    StatusPending.Raw(),
 		Storage:   storage,
@@ -152,11 +150,11 @@ func newPendingFlowData(
 func birthPendingFlow(ctx context.Context,
 	store database.RuntimeStore,
 	uuid,
-	uid string,
+	user string,
 	class FlowClass,
 	storage []byte,
 ) error {
-	dbFlowDataPartial, err := newPendingFlowData(uuid, uid, class, storage)
+	dbFlowDataPartial, err := newPendingFlowData(uuid, user, class, storage)
 	if err != nil {
 		return err
 	}

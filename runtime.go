@@ -18,10 +18,9 @@ import (
 type EventQueue = ratelimit.EventQueue
 
 const (
-	CheckInterval         = time.Second * 5
-	QueueClassGranularity = "job_queue"
-	MaxRetryNum           = 3
-	LockHeartbeat         = time.Second * 3
+	JobPullInterval      = time.Second * 3
+	QueueLockGranularity = "job_queue"
+	LockHeartbeat        = time.Second * 3
 )
 
 type FlowShapingManager struct {
@@ -118,8 +117,8 @@ func NewRuntime(name string, store RuntimeStore, lmBuilder func() (LockManipulat
 	return &Runtime{
 		name:                   name,
 		store:                  store,
-		lockGranularity:        QueueClassGranularity,
-		checkInterval:          CheckInterval,
+		lockGranularity:        QueueLockGranularity,
+		checkInterval:          JobPullInterval,
 		errorCount:             0,
 		lockManipulator:        lm,
 		lockManipulatorBuilder: lmBuilder,
@@ -145,7 +144,6 @@ func (rt *Runtime) Bootstrap(ctx context.Context) error {
 
 	go func() {
 		err := rt.iterateJobs(ctx)
-		// TODO restart ?
 		if err != nil {
 			log.Printf("job events dispatcher exit error: %v", err)
 		}
@@ -165,7 +163,7 @@ func (rt *Runtime) Bootstrap(ctx context.Context) error {
 	return nil
 }
 
-func (rt *Runtime) CreateJob(ctx context.Context, uid string, class FlowClass, jsonSerializableData interface{}) error {
+func (rt *Runtime) CreateJob(ctx context.Context, user string, class FlowClass, jsonSerializableData interface{}) error {
 	//TODO check jsonSerializableData is Storage Type
 
 	data, err := json.Marshal(jsonSerializableData)
@@ -174,7 +172,7 @@ func (rt *Runtime) CreateJob(ctx context.Context, uid string, class FlowClass, j
 	}
 	dbJobMeta := database.JobMetaObject{
 		UUID:   uuid.New(),
-		UserID: uid,
+		UserID: user,
 		Class:  class.Raw(),
 		Data:   data,
 	}
@@ -192,6 +190,10 @@ func (rt *Runtime) CreateJob(ctx context.Context, uid string, class FlowClass, j
 	}
 
 	return nil
+}
+
+func (rt *Runtime) FindJob(ctx context.Context, user string, class FlowClass) {
+
 }
 
 func (rt *Runtime) fetchAllJobEvents(ctx context.Context) ([]*JobMeta, error) {
@@ -221,11 +223,8 @@ func (rt *Runtime) iterateJobs(ctx context.Context) error {
 		case <-ticker.C:
 			metas, err := rt.fetchAllJobEvents(ctx)
 			if err != nil {
-				if rt.errorCount >= MaxRetryNum {
-					return err
-				} else {
-					rt.errorCount += 1
-				}
+				rt.errorCount += 1
+				log.Printf("pulling job error:%v, errorCount=%d\n", err, rt.errorCount)
 			} else {
 				rt.errorCount = 0
 				rt.dispatchJobEvents(ctx, metas)
@@ -238,7 +237,7 @@ func (rt *Runtime) iterateJobs(ctx context.Context) error {
 
 func (rt *Runtime) onLockManipulatorError(reason error) {
 	//TODO pause/stop all executors
-	fmt.Printf("lock connection lost. error : %v\n", reason)
+	fmt.Printf("!!!!!!!!!! lock connection lost. error : %v\n", reason)
 
 	ticker := time.NewTicker(time.Second * 5)
 	defer ticker.Stop()
@@ -247,10 +246,10 @@ func (rt *Runtime) onLockManipulatorError(reason error) {
 		case <-rt.ctx.Done():
 			return
 		case <-ticker.C:
-			log.Printf("rebuilding runtime LockManipulator..")
+			log.Printf("!!!!!!!!!! rebuilding runtime LockManipulator..")
 			lockManipulator, err := rt.lockManipulatorBuilder()
 			if err != nil {
-				log.Printf("rebuild lock manipulator error: %v\n", err)
+				log.Printf("!!!!!!!!!! rebuilding lock manipulator error: %v\n", err)
 			} else {
 				rt.lmMutex.Lock()
 				rt.lockManipulator = lockManipulator

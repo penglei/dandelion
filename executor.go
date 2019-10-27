@@ -23,19 +23,6 @@ type TaskInternalError struct {
 	err error
 }
 
-type WrapError struct {
-	err    error
-	msgTip string
-}
-
-func (e WrapError) Unwrap() error {
-	return e.err
-}
-
-func (e WrapError) Error() string {
-	return fmt.Sprintf(e.msgTip, e.err)
-}
-
 func (e TaskInternalError) Error() string {
 	return fmt.Sprintf("internal error: %v", e.err)
 }
