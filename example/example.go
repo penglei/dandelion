@@ -44,14 +44,11 @@ func main() {
 	}
 
 	role := RoleProducer
-	var agentName string
 	if len(os.Args) >= 2 {
 		if os.Args[1] == "consume" {
 			role = RoleConsumer
 		}
 	}
-
-	flowRuntime := theflow.NewDefaultRuntime(agentName, db)
 
 	ctx := context.Background()
 	//ctx, cancelFn := context.WithCancel(ctx)
@@ -59,7 +56,6 @@ func main() {
 	switch role {
 	case RoleProducer:
 		user := "user_default"
-
 		if len(os.Args) >= 3 {
 			user = os.Args[2]
 		}
@@ -67,12 +63,18 @@ func main() {
 		meshStorage := InstallMeshStorage{
 			MeshTitle: "test mesh installing",
 		}
+		flowRuntime := theflow.NewDefaultRuntime("", db)
 		err = flowRuntime.CreateJob(ctx, user, FlowClassInstall, meshStorage)
 		if err != nil {
 			panic(err)
 		}
 	case RoleConsumer:
+		var agentName string
+		if len(os.Args) >= 3 {
+			agentName = os.Args[2]
+		}
 
+		flowRuntime := theflow.NewDefaultRuntime(agentName, db)
 		err = flowRuntime.Bootstrap(ctx)
 		if err != nil {
 			panic(err)
