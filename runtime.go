@@ -237,21 +237,33 @@ func (rt *Runtime) iterateJobs(ctx context.Context) error {
 }
 
 func (rt *Runtime) onLockManipulatorError(reason error) {
-	//TODO parse all executors
-	fmt.Printf("lock connection lost: %v\n", reason)
-	lockManipulator, err := rt.lockManipulatorBuilder()
-	if err != nil {
-		panic(fmt.Sprintf("rebuild lock manipulator error: %v", err))
-	}
+	//TODO pause/stop all executors
+	fmt.Printf("lock connection lost. error : %v\n", reason)
 
-	rt.lmMutex.Lock()
-	defer rt.lmMutex.Unlock()
-	rt.lockManipulator = lockManipulator
-	if err = rt.lockManipulator.Bootstrap(rt.ctx, rt.onLockManipulatorError); err != nil {
-		//TODO stop all executors
-		panic(fmt.Sprintf("rerun lock manipulator error: %v", err))
+	ticker := time.NewTicker(time.Second * 5)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-rt.ctx.Done():
+			return
+		case <-ticker.C:
+			log.Printf("rebuilding runtime LockManipulator..")
+			lockManipulator, err := rt.lockManipulatorBuilder()
+			if err != nil {
+				log.Printf("rebuild lock manipulator error: %v\n", err)
+			} else {
+				rt.lmMutex.Lock()
+				rt.lockManipulator = lockManipulator
+				if err = rt.lockManipulator.Bootstrap(rt.ctx, rt.onLockManipulatorError); err != nil {
+					rt.lmMutex.Unlock()
+					panic(fmt.Sprintf("rerun lock manipulator error: %v", err))
+				}
+				rt.lmMutex.Unlock()
+				//TODO resume all executors
+				return
+			}
+		}
 	}
-	//TODO resume all executors
 }
 
 func (rt *Runtime) onJobComplete(target interface{}) {

@@ -27,21 +27,21 @@ func getConnId(conn *sql.Conn) (int, error) {
 }
 
 type mysqlLockManipulator struct {
-	agentName     string
-	db            *sql.DB
-	conn          *sql.Conn
-	lockerConnId  int
-	hbInterval    time.Duration
-	waitInterval  time.Duration // int64(HbInterval) * 1500 * 1000 * 1000)
-	lockersMutex  sync.RWMutex
-	lockers       map[string]struct{}
-	chordCallback func(err error)
+	agentName       string
+	db              *sql.DB
+	conn            *sql.Conn
+	lockerConnId    int
+	hbInterval      time.Duration
+	waitInterval    time.Duration // int64(HbInterval) * 1500 * 1000 * 1000)
+	lockersMutex    sync.RWMutex
+	lockers         map[string]struct{}
+	connErrCallback func(err error)
 }
 
 func (m *mysqlLockManipulator) checkConnectionIsAlive(ctx context.Context) bool {
 	err := m.conn.PingContext(ctx)
 	if err != nil {
-		m.chordCallback(errors.WithStack(err))
+		m.connErrCallback(err)
 		return false
 	}
 	return true
@@ -274,7 +274,7 @@ func (m *mysqlLockManipulator) checkRunningAgain(ctx context.Context) (bool, err
 	return !locked, err
 }
 
-func (m *mysqlLockManipulator) Bootstrap(ctx context.Context, chordCallback func(err error)) error {
+func (m *mysqlLockManipulator) Bootstrap(ctx context.Context, connErrCallback func(err error)) error {
 
 	yes, err := m.checkRunningAgain(ctx)
 	if err != nil {
@@ -284,7 +284,7 @@ func (m *mysqlLockManipulator) Bootstrap(ctx context.Context, chordCallback func
 		return fmt.Errorf("a unique name for bootstrapping flow runtime, [%s] is in use!" + m.agentName)
 	}
 
-	m.chordCallback = chordCallback
+	m.connErrCallback = connErrCallback
 	go func() {
 		err := m.checkLockerConnAndHeartbeat(ctx)
 		if err != nil {
