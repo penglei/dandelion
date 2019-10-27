@@ -250,17 +250,17 @@ func (rt *Runtime) onLockManipulatorError(reason error) {
 			lockManipulator, err := rt.lockManipulatorBuilder()
 			if err != nil {
 				log.Printf("!!!!!!!!!! rebuilding lock manipulator error: %v\n", err)
-			} else {
-				rt.lmMutex.Lock()
-				rt.lockManipulator = lockManipulator
-				if err = rt.lockManipulator.Bootstrap(rt.ctx, rt.onLockManipulatorError); err != nil {
-					rt.lmMutex.Unlock()
-					panic(fmt.Sprintf("rerun lock manipulator error: %v", err))
-				}
-				rt.lmMutex.Unlock()
-				//TODO resume all executors
-				return
+				continue
 			}
+			if err = lockManipulator.Bootstrap(rt.ctx, rt.onLockManipulatorError); err != nil {
+				log.Printf("!!!!!!!!!!  manipulator bootstrap error: %v \n", err)
+				continue
+			}
+			rt.lmMutex.Lock()
+			rt.lockManipulator = lockManipulator
+			rt.lmMutex.Unlock()
+			//TODO resume all executors
+			return
 		}
 	}
 }

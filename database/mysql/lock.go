@@ -27,24 +27,14 @@ func getConnId(conn *sql.Conn) (int, error) {
 }
 
 type mysqlLockManipulator struct {
-	agentName       string
-	db              *sql.DB
-	conn            *sql.Conn
-	lockerConnId    int
-	hbInterval      time.Duration
-	waitInterval    time.Duration // int64(HbInterval) * 1500 * 1000 * 1000)
-	lockersMutex    sync.RWMutex
-	lockers         map[string]struct{}
-	connErrCallback func(err error)
-}
-
-func (m *mysqlLockManipulator) checkConnectionIsAlive(ctx context.Context) bool {
-	err := m.conn.PingContext(ctx)
-	if err != nil {
-		m.connErrCallback(err)
-		return false
-	}
-	return true
+	agentName    string
+	db           *sql.DB
+	conn         *sql.Conn
+	lockerConnId int
+	hbInterval   time.Duration
+	waitInterval time.Duration // int64(HbInterval) * 1500 * 1000 * 1000)
+	lockersMutex sync.RWMutex
+	lockers      map[string]struct{}
 }
 
 func (m *mysqlLockManipulator) cacheLocker(ctx context.Context, key string) {
@@ -226,17 +216,18 @@ func (m *mysqlLockManipulator) AcquireLock(ctx context.Context, key string) (boo
 	}
 }
 
-func (m *mysqlLockManipulator) checkLockerConnAndHeartbeat(ctx context.Context) error {
+func (m *mysqlLockManipulator) checkLockConnAndDoHeartbeat(ctx context.Context) error {
 	ticker := time.NewTicker(m.hbInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
-			if !m.checkConnectionIsAlive(ctx) {
-				return nil
-			}
 
+			err := m.conn.PingContext(ctx)
+			if err != nil {
+				return err
+			}
 			m.lockersMutex.RLock()
 			if len(m.lockers) == 0 {
 				m.lockersMutex.RUnlock()
@@ -259,6 +250,7 @@ func (m *mysqlLockManipulator) checkLockerConnAndHeartbeat(ctx context.Context) 
 				_, err := stmt.ExecContext(ctx, key)
 				if err != nil {
 					log.Printf("renew last_seen for:%s error: %v", key, err)
+					return err
 				}
 			}
 
@@ -284,11 +276,11 @@ func (m *mysqlLockManipulator) Bootstrap(ctx context.Context, connErrCallback fu
 		return fmt.Errorf("a unique name for bootstrapping flow runtime, [%s] is in use!" + m.agentName)
 	}
 
-	m.connErrCallback = connErrCallback
 	go func() {
-		err := m.checkLockerConnAndHeartbeat(ctx)
+		err := m.checkLockConnAndDoHeartbeat(ctx)
 		if err != nil {
 			log.Printf("locker checking exit accidentally! error:%v", err)
+			connErrCallback(err)
 		}
 	}()
 	return nil

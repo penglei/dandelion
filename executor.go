@@ -10,6 +10,7 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"time"
 )
 
 const (
@@ -170,11 +171,10 @@ func (exc *Executor) dealRunning(ctx context.Context, f *Flow) error {
 		return err
 	}
 
-	err = f.persistStartRunningStat(ctx, store)
-	if err != nil {
-		//since this operation can't be succeed,
-		//next logic in this function can't.
-		return err
+	dbErr := f.persistStartRunningStat(ctx, store)
+	if dbErr != nil {
+		//since this operation can't be succeed, so the following logic in this function can't.
+		return dbErr
 	}
 
 	var flowError error
@@ -274,8 +274,11 @@ func (exc *Executor) spawn(ctx context.Context, f *Flow) error {
 		case StatusRunning:
 			err := exc.dealRunning(ctx, f)
 			if err != nil {
-				log.Printf("flow dealRunning return an error: %v\n", err)
+				log.Printf("flow dealRunning got an error: %v\n", err)
+				//if we don't sleep for a while, the flow FSM will be tight loop on StatusRunning
+				time.Sleep(time.Second * 3)
 			}
+
 		case StatusFailure:
 			return exc.dealFailure(ctx, f)
 		case StatusSuccess:
