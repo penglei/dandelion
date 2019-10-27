@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"git.code.oa.com/tke/theflow"
 	_ "github.com/go-sql-driver/mysql"
+	"os"
 )
 
 type MySQLOptions struct {
@@ -16,6 +17,11 @@ type MySQLOptions struct {
 	Name     string
 	Charset  string
 }
+
+const (
+	RoleProducer = 1 + iota
+	RoleConsumer
+)
 
 func main() {
 
@@ -37,32 +43,42 @@ func main() {
 		panic(err)
 	}
 
-	flowRuntime := theflow.NewDefaultRuntime("example_local", db)
-
-	ctx := context.Background()
-	ctx, cancelFn := context.WithCancel(ctx)
-	err = flowRuntime.Bootstrap(ctx)
-	if err != nil {
-		panic(err)
+	role := RoleProducer
+	var agentName string
+	if len(os.Args) >= 2 {
+		if os.Args[1] == "consume" {
+			role = RoleConsumer
+			agentName = os.Args[2]
+		}
 	}
 
-	createNewJob := true
-	//createNewJob = false
+	flowRuntime := theflow.NewDefaultRuntime(agentName, db)
 
-	if createNewJob {
+	ctx := context.Background()
+	//ctx, cancelFn := context.WithCancel(ctx)
+
+	switch role {
+	case RoleProducer:
 		user := "user_local"
 		meshStorage := InstallMeshStorage{
-			MeshTitle: "test_mesh_installing",
+			MeshTitle: "test mesh installing",
 		}
 		err = flowRuntime.CreateJob(ctx, user, FlowClassInstall, meshStorage)
 		if err != nil {
 			panic(err)
 		}
+	case RoleConsumer:
+
+		err = flowRuntime.Bootstrap(ctx)
+		if err != nil {
+			panic(err)
+		}
+		stopCh := make(chan struct{})
+		<-stopCh
+		//cancelFn()
+
 	}
 
-	stopCh := make(chan struct{})
-	<-stopCh
-	cancelFn()
 }
 
 func init() {
