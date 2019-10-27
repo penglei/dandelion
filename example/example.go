@@ -48,7 +48,6 @@ func main() {
 	if len(os.Args) >= 2 {
 		if os.Args[1] == "consume" {
 			role = RoleConsumer
-			agentName = os.Args[2]
 		}
 	}
 
@@ -59,7 +58,12 @@ func main() {
 
 	switch role {
 	case RoleProducer:
-		user := "user_local"
+		user := "user_default"
+
+		if len(os.Args) >= 3 {
+			user = os.Args[2]
+		}
+
 		meshStorage := InstallMeshStorage{
 			MeshTitle: "test mesh installing",
 		}
