@@ -135,6 +135,7 @@ func (rt *Runtime) SetWorkerNum(n int) {
 	rt.workerNum = n
 }
 
+//bootstrap event consumer and flow executor
 func (rt *Runtime) Bootstrap(ctx context.Context) error {
 	rt.ctx = ctx
 	err := rt.lockManipulator.Bootstrap(rt.ctx, rt.onLockManipulatorError)

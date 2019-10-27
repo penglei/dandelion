@@ -77,7 +77,7 @@ func (mj *meshInstallJob) FirstTask(ctx Context) error {
 	log.Printf("FirstTask running, storage: %v, data: %v \n", storage, mj.Data)
 	mj.Data.Bar = 456
 	log.Printf("FirstTask set data: %v", mj.Data)
-	panic("FirstTask panic!")
+	//panic("FirstTask panic!")
 	time.Sleep(time.Second * 2)
 	return ctx.Save()
 }

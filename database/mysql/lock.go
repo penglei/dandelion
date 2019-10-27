@@ -3,6 +3,7 @@ package mysql
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"github.com/pkg/errors"
 	"log"
 	"sync"
@@ -267,7 +268,22 @@ func (m *mysqlLockManipulator) checkLockerConnAndHeartbeat(ctx context.Context) 
 	}
 }
 
+func (m *mysqlLockManipulator) checkRunningAgain(ctx context.Context) (bool, error) {
+	agentInstanceKey := fmt.Sprintf("__flow_agent:%s", m.agentName)
+	locked, err := m.doLockRequest(ctx, agentInstanceKey)
+	return !locked, err
+}
+
 func (m *mysqlLockManipulator) Bootstrap(ctx context.Context, chordCallback func(err error)) error {
+
+	yes, err := m.checkRunningAgain(ctx)
+	if err != nil {
+		return err
+	}
+	if yes {
+		return fmt.Errorf("a unique name for bootstrapping flow runtime, [%s] is in use!" + m.agentName)
+	}
+
 	m.chordCallback = chordCallback
 	go func() {
 		err := m.checkLockerConnAndHeartbeat(ctx)

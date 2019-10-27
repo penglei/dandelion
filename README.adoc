@@ -47,7 +47,6 @@ internal data type converting path
 == TODO
 
 * query job flow status in runtime
-* Runtime name(id) must be protected by lock. the runtime bootstraps with name has registered should be panic.
 * use log: github.com/uber-go/zap **
 * task orchestration can visit flow scheme
 * save job id (offset) in flow
