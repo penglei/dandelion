@@ -26,6 +26,7 @@ func getConnId(conn *sql.Conn) (int, error) {
 	return connId, err
 }
 
+//notice: Acquire/Release is not thread-safety
 type mysqlLockManipulator struct {
 	agentName    string
 	db           *sql.DB
@@ -44,7 +45,7 @@ func (m *mysqlLockManipulator) cacheLocker(ctx context.Context, key string) {
 }
 
 func (m *mysqlLockManipulator) registerLock(ctx context.Context, key string) error {
-	_, err := m.conn.ExecContext(ctx, "INSERT lock_timer (`key`, `agent_name`, `last_seen`) VALUES(?, ?, NOW())", key, m.agentName)
+	_, err := m.db.ExecContext(ctx, "INSERT lock_timer (`key`, `agent_name`, `last_seen`) VALUES(?, ?, NOW())", key, m.agentName)
 	if IsKeyDuplicationError(err) {
 		log.Printf("unreachable error:%v", err)
 		return err
@@ -56,7 +57,7 @@ func (m *mysqlLockManipulator) registerLock(ctx context.Context, key string) err
 func (m *mysqlLockManipulator) getLockTimerRecord(ctx context.Context, key string) (*mysqlLockTimer, error) {
 	lockTimer := &mysqlLockTimer{Key: key}
 	querySql := "SELECT agent_name, last_seen FROM lock_timer WHERE `key` = ?"
-	err := m.conn.QueryRowContext(ctx, querySql, key).Scan(&lockTimer.AgentName, &lockTimer.LastSeen)
+	err := m.db.QueryRowContext(ctx, querySql, key).Scan(&lockTimer.AgentName, &lockTimer.LastSeen)
 	if hasErr, err := CheckNoRowsError(err); hasErr {
 		return nil, err
 	}
@@ -65,7 +66,7 @@ func (m *mysqlLockManipulator) getLockTimerRecord(ctx context.Context, key strin
 
 func (m *mysqlLockManipulator) takeoverLock(ctx context.Context, key string) error {
 	upsertSql := "INSERT INTO lock_timer (`key`, agent_name, last_seen) VALUES (?, ?, NOW()) ON DUPLICATE KEY UPDATE last_seen = NOW(), agent_name = ?"
-	_, err := m.conn.ExecContext(ctx, upsertSql, key, m.agentName, m.agentName)
+	_, err := m.db.ExecContext(ctx, upsertSql, key, m.agentName, m.agentName)
 	if err != nil {
 		return err
 	}
@@ -90,12 +91,11 @@ func (m *mysqlLockManipulator) releaseSchemaLock(ctx context.Context, key string
 }
 
 func (m *mysqlLockManipulator) ReleaseLock(ctx context.Context, key string) error {
-	//TODO log, retry
 	if err := m.releaseSchemaLock(ctx, key); err != nil {
 		return err
 	}
 
-	_, err := m.conn.ExecContext(ctx, "DELETE FROM lock_timer where `key` = ? and agent_name = ?", key, m.agentName)
+	_, err := m.db.ExecContext(ctx, "DELETE FROM lock_timer where `key` = ? and agent_name = ?", key, m.agentName)
 	if err != nil {
 		return err
 	}
@@ -104,7 +104,7 @@ func (m *mysqlLockManipulator) ReleaseLock(ctx context.Context, key string) erro
 
 func (m *mysqlLockManipulator) checkSchemeLockWhetherIsOwned(ctx context.Context, key string) (bool, error) {
 	var connId sql.NullInt32
-	err := m.conn.QueryRowContext(ctx, "SELECT IS_USED_LOCK(?) as conn_id", key).Scan(&connId)
+	err := m.db.QueryRowContext(ctx, "SELECT IS_USED_LOCK(?) as conn_id", key).Scan(&connId)
 	if err != nil && !IsNoRowsError(err) {
 		return false, err
 	}
@@ -224,7 +224,7 @@ func (m *mysqlLockManipulator) checkLockConnAndDoHeartbeat(ctx context.Context) 
 		select {
 		case <-ticker.C:
 
-			err := m.conn.PingContext(ctx)
+			err := m.db.PingContext(ctx)
 			if err != nil {
 				return err
 			}
@@ -241,7 +241,7 @@ func (m *mysqlLockManipulator) checkLockConnAndDoHeartbeat(ctx context.Context) 
 
 			//XXX maybe we should use another db connection
 			hbSql := "UPDATE lock_timer SET last_seen=NOW() WHERE `key` = ?"
-			stmt, err := m.conn.PrepareContext(ctx, hbSql)
+			stmt, err := m.db.PrepareContext(ctx, hbSql)
 			if err != nil {
 				return err
 			}

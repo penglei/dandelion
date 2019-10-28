@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"git.code.oa.com/tke/theflow"
 	"github.com/pborman/uuid"
 	"log"
@@ -86,5 +87,6 @@ func (mj *meshInstallJob) SecondTask(ctx Context) error {
 	storage := ctx.Global().(*InstallMeshStorage)
 	log.Printf("SecondTask running, storage: %v, data: %v\n", storage, mj.Data)
 	mj.K8sSvc.GetCluster(storage.MeshName)
-	return nil //fmt.Errorf("custom error in second")
+	return fmt.Errorf("custom error in second")
+	//return nil
 }
