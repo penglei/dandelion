@@ -36,6 +36,9 @@ func RegisterJobFlow(job *meshInstallJob) {
 		Name:       FlowClassInstall,
 		NewStorage: func() interface{} { return &InstallMeshStorage{} },
 		Tasks:      theflow.NewChainedTasks([]TaskScheme{t1, t2}),
+		OnFailure: func(ctx theflow.Context) {
+			log.Printf("failure, storage:%v\n", ctx.Global())
+		},
 	}
 
 	theflow.Register(installMeshFlow)
