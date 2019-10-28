@@ -121,7 +121,7 @@ func (m *mysqlLockManipulator) checkSchemeLockWhetherIsOwned(ctx context.Context
 
 func (m *mysqlLockManipulator) doLockRequest(ctx context.Context, key string) (bool, error) {
 	var flag sql.NullInt32
-	log.Printf("db get_lock(%s, 0)\n", key)
+	log.Printf("connection(%d) get_lock(%s, 0)\n", m.lockerConnId, key)
 	err := m.conn.QueryRowContext(ctx, "SELECT GET_LOCK(?, 0) as flag", key).Scan(&flag)
 	if err != nil && !IsNoRowsError(err) {
 		return false, err
@@ -278,7 +278,11 @@ func (m *mysqlLockManipulator) Bootstrap(ctx context.Context, connErrCallback fu
 
 	go func() {
 		err := m.checkLockConnAndDoHeartbeat(ctx)
+
 		if err != nil {
+			if err := m.conn.Close(); err != nil {
+				log.Printf("close lock manipulator connection error:%v\n", err)
+			}
 			log.Printf("locker checking exit accidentally! error:%v", err)
 			connErrCallback(err)
 		}

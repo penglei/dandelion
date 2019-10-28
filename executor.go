@@ -98,14 +98,15 @@ func (exc *Executor) dealTaskRunning(ctx context.Context, f *Flow, t *Task) erro
 		}
 
 		flowContext := NewFlowContext(ctx, exc.store, f)
-		var taskError error
-		func() {
+		var taskError = func() (err error) {
 			defer func() {
 				if p := recover(); p != nil {
-					taskError = fmt.Errorf("task panic: %v", p)
+					err = fmt.Errorf("task(%s, %s) panic: %v", f.uuid, t.name, p)
 				}
 			}()
-			taskError = t.scheme.Task.Execute(flowContext)
+
+			err = t.scheme.Task.Execute(flowContext)
+			return
 		}()
 
 		if taskError != nil {
@@ -113,7 +114,7 @@ func (exc *Executor) dealTaskRunning(ctx context.Context, f *Flow, t *Task) erro
 			t.setStatus(StatusFailure)
 			t.setError(taskError)
 			if err := t.persistTask(ctx, exc.store, f.flowId, util.TaskSetError|util.TaskSetFinishStat); err != nil {
-				log.Printf("task(%s-%s) execution failed:%v, and status save failed \n", taskError, f.uuid, t.name)
+				log.Printf("task(%s, %s) execution failed:%v, and status save failed \n", taskError, f.uuid, t.name)
 			}
 			//}
 
@@ -123,7 +124,7 @@ func (exc *Executor) dealTaskRunning(ctx context.Context, f *Flow, t *Task) erro
 			t.setStatus(StatusSuccess)
 			err := t.persistTask(ctx, exc.store, f.flowId, util.TaskUpdateDefault|util.TaskSetFinishStat)
 			if err != nil {
-				log.Printf("task(%s-%s) execution successful, but status save failed \n", f.uuid, t.name)
+				log.Printf("task(%s, %s) execution successful, but status save failed \n", f.uuid, t.name)
 				return nil
 			}
 			//}
@@ -229,24 +230,22 @@ func (exc *Executor) dealRunning(ctx context.Context, f *Flow) error {
 	return nil
 }
 
-func (exc *Executor) dealSuccess(ctx context.Context, f *Flow) error {
+func (exc *Executor) dealSuccess(ctx context.Context, f *Flow) {
 	flowContext := NewFlowContext(ctx, exc.store, f)
 	if f.scheme.OnSuccess != nil {
 		f.scheme.OnSuccess(flowContext)
 	}
 	exc.notifyAgent.TriggerFlowComplete(ctx.Value(contextMetaKey))
 	exc.doCompleteStat(ctx, f)
-	return nil
 }
 
-func (exc *Executor) dealFailure(ctx context.Context, f *Flow) error {
+func (exc *Executor) dealFailure(ctx context.Context, f *Flow) {
 	flowContext := NewFlowContext(ctx, exc.store, f)
 	if f.scheme.OnFailure != nil {
 		f.scheme.OnFailure(flowContext)
 	}
 	exc.notifyAgent.TriggerFlowComplete(ctx.Value(contextMetaKey))
 	exc.doCompleteStat(ctx, f)
-	return nil
 }
 
 func (exc *Executor) doCompleteStat(ctx context.Context, f *Flow) {
@@ -263,25 +262,21 @@ func (exc *Executor) spawn(ctx context.Context, f *Flow) {
 		case StatusPending:
 			if err := exc.dealPending(ctx, f); err != nil {
 				log.Printf("flow(%s-%s) dealPending error:%v\n", f.scheme.Name, f.uuid, err)
+				exc.notifyAgent.TriggerFlowRetry(ctx.Value(contextMetaKey))
 				return
 			}
 		case StatusRunning:
 			err := exc.dealRunning(ctx, f)
 			if err != nil {
 				log.Printf("flow(%s-%s) dealRunning error: %v\n", f.scheme.Name, f.uuid, err)
+				exc.notifyAgent.TriggerFlowRetry(ctx.Value(contextMetaKey))
 				return
 			}
-		case StatusFailure:
-			err := exc.dealFailure(ctx, f)
-			if err != nil {
-				log.Printf("flow(%s-%s) dealRunning error: %v\n", f.scheme.Name, f.uuid, err)
-			}
-			return
 		case StatusSuccess:
-			err := exc.dealSuccess(ctx, f)
-			if err != nil {
-				log.Printf("flow(%s-%s) dealRunning error: %v\n", f.scheme.Name, f.uuid, err)
-			}
+			exc.dealSuccess(ctx, f)
+			return
+		case StatusFailure:
+			exc.dealFailure(ctx, f)
 			return
 		default:
 			panic("unknown flow status")

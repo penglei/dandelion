@@ -29,33 +29,39 @@ type FlowShapingManager struct {
 }
 
 //concentrator
-func (f *FlowShapingManager) AddQueues(queues map[string]EventQueue) {
-	f.mutex.Lock()
-	defer f.mutex.Unlock()
+func (m *FlowShapingManager) AddQueues(queues map[string]EventQueue) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
 
 	for key, metas := range queues {
-		q, ok := f.sinks[key]
+		q, ok := m.sinks[key]
 		if !ok {
-			q = ratelimit.NewQueuedThrottle(metas) //TODO configurable
-			f.sinks[key] = q
+			q = ratelimit.NewQueuedThrottle(metas)
+			m.sinks[key] = q
 		} else {
 			q.MergeInto(metas)
 		}
 	}
 }
 
-func (f *FlowShapingManager) Remove(key string) {
-	f.mutex.Lock()
-	delete(f.sinks, key)
-	f.mutex.Unlock()
+func (m *FlowShapingManager) DropAllQueues() {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	m.sinks = make(map[string]ratelimit.FlowShaping)
 }
 
-func (f *FlowShapingManager) PickOutAll() []*JobMeta {
-	f.mutex.Lock()
-	defer f.mutex.Unlock()
+func (m *FlowShapingManager) Remove(key string) {
+	m.mutex.Lock()
+	delete(m.sinks, key)
+	m.mutex.Unlock()
+}
+
+func (m *FlowShapingManager) PickOutAll() []*JobMeta {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
 
 	events := make([]ratelimit.Event, 0)
-	for _, q := range f.sinks {
+	for _, q := range m.sinks {
 		events = append(events, q.PickOut()...)
 	}
 
@@ -66,13 +72,23 @@ func (f *FlowShapingManager) PickOutAll() []*JobMeta {
 	return metas
 }
 
-func (f *FlowShapingManager) Commit(key string, meta *JobMeta) {
-	f.mutex.Lock()
-	defer f.mutex.Unlock()
+func (m *FlowShapingManager) Commit(key string, meta *JobMeta) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
 
-	q, ok := f.sinks[key]
+	q, ok := m.sinks[key]
 	if ok {
 		q.Commit(meta)
+	}
+}
+
+func (m *FlowShapingManager) Rollback(key string, meta *JobMeta) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	q, ok := m.sinks[key]
+	if ok {
+		q.Rollback(meta.GetOffset())
 	}
 }
 
@@ -146,11 +162,14 @@ func (rt *Runtime) Bootstrap(ctx context.Context) error {
 		err := rt.iterateJobs(ctx)
 		if err != nil {
 			log.Printf("job events dispatcher exit error: %v", err)
+			return
 		}
+		log.Printf("job events dispatcher has exited!\n")
 	}()
 
 	notifyAgent := &NotificationAgent{}
 	notifyAgent.RegisterFlowComplete(rt.onJobComplete)
+	notifyAgent.RegisterFlowRetry(rt.onJobRetry)
 
 	for i := 0; i < rt.workerNum; i += 1 {
 		executor := NewExecutor(rt.name, notifyAgent, rt.store)
@@ -265,8 +284,8 @@ func (rt *Runtime) onLockManipulatorError(reason error) {
 	}
 }
 
-func (rt *Runtime) onJobComplete(target interface{}) {
-	meta := target.(*JobMeta)
+func (rt *Runtime) onJobComplete(item interface{}) {
+	meta := item.(*JobMeta)
 	key := rt.getJobQueueName(meta)
 	rt.shapingManager.Commit(key, meta)
 
@@ -275,6 +294,12 @@ func (rt *Runtime) onJobComplete(target interface{}) {
 		log.Printf("delete job event failed: %v\n", err)
 	}
 	rt.forward()
+}
+
+func (rt *Runtime) onJobRetry(item interface{}) {
+	meta := item.(*JobMeta)
+	key := rt.getJobQueueName(meta)
+	rt.shapingManager.Rollback(key, meta)
 }
 
 func (rt *Runtime) dispatchJobEvents(ctx context.Context, metas []*JobMeta) {
@@ -297,12 +322,11 @@ func (rt *Runtime) dispatchJobEvents(ctx context.Context, metas []*JobMeta) {
 	for queueName, queue := range eventsMapQueue {
 		locked, err := rt.lockManipulator.AcquireLock(ctx, queueName)
 		if err != nil {
-			//TODO log error
 			log.Printf("acquire lock(%s) error:%v\n", queueName, err)
 			continue
 		}
 		if !locked {
-			log.Printf("acquire lock(%s) fail", queueName)
+			log.Printf("can't get the lock: %s\n", queueName)
 			continue
 		}
 		ownedMapQueue[queueName] = queue

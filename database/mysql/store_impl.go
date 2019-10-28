@@ -13,7 +13,7 @@ type mysqlStore struct {
 }
 
 func (ms *mysqlStore) LoadUncommittedJobEvents(ctx context.Context) ([]*database.JobMetaObject, error) {
-	querySql := "SELECT `id`, `uuid`, `userid`, `class`, `data` FROM job_event WHERE `deleted_at` is NULL"
+	querySql := "SELECT `id`, `uuid`, `userid`, `class`, `data` FROM job_event WHERE `deleted_at` is NULL ORDER BY `id`"
 	rows, err := ms.db.QueryContext(ctx, querySql)
 	if err != nil {
 		return nil, err

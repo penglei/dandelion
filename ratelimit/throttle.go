@@ -6,8 +6,9 @@ type EventQueue = *list.List
 
 type FlowShaping interface {
 	MergeInto(EventQueue)
-	Commit(Event)
 	PickOut() []Event
+	Commit(Event)
+	Rollback(int64)
 }
 
 type Event interface {

@@ -1,5 +1,9 @@
 package ratelimit
 
+import (
+	"fmt"
+)
+
 type QueuedJobThrottle struct {
 	lastOffset    int64
 	runningOffset int64
@@ -41,6 +45,14 @@ func (q *QueuedJobThrottle) Commit(event Event) {
 	q.runningOffset = 0
 }
 
+func (q *QueuedJobThrottle) Rollback(offset int64) {
+	if q.runningOffset == offset {
+		q.runningOffset = 0
+	} else {
+		panic(fmt.Errorf("rollback offset:%d is not running offset:%d", offset, q.runningOffset))
+	}
+}
+
 func (q *QueuedJobThrottle) PickOut() []Event {
 	if q.runningOffset == 0 {
 		frontElem := q.queue.Front()
@@ -50,7 +62,7 @@ func (q *QueuedJobThrottle) PickOut() []Event {
 			return []Event{item}
 		}
 	} else {
-		//TODO log no queue to run
+		//log no queue to run
 	}
 	return nil
 }
