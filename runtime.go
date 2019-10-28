@@ -272,7 +272,7 @@ func (rt *Runtime) onJobComplete(target interface{}) {
 
 	err := rt.store.DeleteJobEvent(rt.ctx, meta.uuid)
 	if err != nil {
-		//TODO important! error log, can retry!
+		log.Printf("delete job event failed: %v\n", err)
 	}
 	rt.forward()
 }

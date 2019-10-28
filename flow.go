@@ -9,6 +9,7 @@ import (
 type Flow struct {
 	FlowRuntimeState
 	flowId        int64
+	uuid          string
 	scheme        *FlowScheme
 	orchestration TaskOrchestration
 	storage       interface{}
@@ -20,6 +21,10 @@ func (f *Flow) commitStash() {
 	stash := &f.stash
 	f.status = stash.status
 	f.runningCnt = stash.runningCnt
+}
+
+func (f *Flow) commitStashStatus() {
+	f.status = f.stash.status
 }
 
 func (f *Flow) persistFlow(ctx context.Context, store RuntimeStore, mask util.BitMask) error {
@@ -62,7 +67,10 @@ func (f *Flow) persistStartRunningStat(ctx context.Context, store RuntimeStore) 
 	}
 	f.stash.runningCnt += 1
 
-	return f.persistFlow(ctx, store, mask)
+	if err := f.persistFlow(ctx, store, mask); err != nil {
+		f.stash.runningCnt -= 1
+	}
+	return nil
 }
 
 func (f *Flow) persistEndRunningStat(ctx context.Context, store database.RuntimeStore) error {
@@ -110,6 +118,7 @@ func newFlow(dbFlowObj database.FlowDataObject) (*Flow, error) {
 	f := &Flow{
 		FlowRuntimeState: runtimeState,
 		flowId:           dbFlowObj.ID,
+		uuid:             dbFlowObj.EventUUID,
 		state:            state,
 		scheme:           scheme,
 		orchestration:    orchestration,

@@ -10,7 +10,6 @@ import (
 	"log"
 	"strings"
 	"sync"
-	"time"
 )
 
 const (
@@ -20,67 +19,68 @@ const (
 
 type RuntimeStore = database.RuntimeStore
 
-type TaskInternalError struct {
-	err error
-}
-
-func (e TaskInternalError) Error() string {
-	return fmt.Sprintf("internal error: %v", e.err)
-}
-
-func (e TaskInternalError) Unwrap() error {
-	return e.err
-}
-
-func wrapInternalError(err error) error {
-	if err != nil {
-		return TaskInternalError{err}
-	}
-	return nil
-}
-
-type TaskRetryableError struct {
-	err error
-}
-
-func (e TaskRetryableError) Error() string {
-	return fmt.Sprintf("an error has occurred that can be retried: %v", e)
-}
-
-func (e TaskRetryableError) Unwrap() error {
-	return e.err
-}
-
 type taskErrorSanitation struct {
-	hasError       *atomic.Bool
-	errors         sync.Map
-	internalErrors sync.Map
+	internalOnlyFlag *atomic.Bool
+	flag             *atomic.Bool
+	errors           sync.Map
 }
 
-func newTasksErrorSanitation() *taskErrorSanitation {
+func newTaskErrorsSanitation() *taskErrorSanitation {
 	return &taskErrorSanitation{
-		hasError: atomic.NewBool(false),
-		errors:   sync.Map{},
+		internalOnlyFlag: atomic.NewBool(true),
+		flag:             atomic.NewBool(false),
+		errors:           sync.Map{},
 	}
+}
+
+type internalError struct {
+	err error
+}
+
+func (e internalError) Error() string {
+	return e.err.Error()
+}
+
+type multiError struct {
+	errors []error
+}
+
+func (e *multiError) AddError(err error) {
+	e.errors = append(e.errors, err)
+}
+
+func (e multiError) Error() string {
+	errMessages := make([]string, 0, len(e.errors))
+	for _, err := range e.errors {
+		errMessages = append(errMessages, err.Error())
+	}
+	return strings.Join(errMessages, "\n")
 }
 
 func (tes *taskErrorSanitation) HasError() bool {
-	return tes.hasError.Load()
+	return tes.flag.Load()
 }
 
 func (tes *taskErrorSanitation) GetErrors() error {
-	var errorMsg []string
+	var multiErr multiError
 	tes.errors.Range(func(key, value interface{}) bool {
 		taskName := key.(string)
 		err := value.(error)
-		errorMsg = append(errorMsg, fmt.Sprintf("task(%s) occured an error:%v", taskName, err))
+		multiErr.AddError(fmt.Errorf("task(%s) occured an error:%v", taskName, err))
 		return true
 	})
-	return errors.New(strings.Join(errorMsg, "\n"))
+	return multiErr
+}
+
+func (tes *taskErrorSanitation) HasInternalErrorOnly() bool {
+	return tes.internalOnlyFlag.Load()
 }
 
 func (tes *taskErrorSanitation) AddError(taskName string, err error) {
-	tes.hasError.Store(true)
+	tes.flag.Store(true)
+	if _, ok := err.(internalError); !ok {
+		tes.internalOnlyFlag.Store(false)
+	}
 	tes.errors.Store(taskName, err)
 }
 
@@ -92,10 +92,9 @@ type Executor struct {
 
 func (exc *Executor) dealTaskRunning(ctx context.Context, f *Flow, t *Task) error {
 	if !t.executed {
-		// task can't be resumed from intermediate state
 		t.setHasBeenExecuted()
 		if err := t.persistTask(ctx, exc.store, f.flowId, util.TaskSetExecuted); err != nil {
-			return TaskRetryableError{err}
+			return internalError{err}
 		}
 
 		flowContext := NewFlowContext(ctx, exc.store, f)
@@ -110,45 +109,50 @@ func (exc *Executor) dealTaskRunning(ctx context.Context, f *Flow, t *Task) erro
 		}()
 
 		if taskError != nil {
+			//{
 			t.setStatus(StatusFailure)
 			t.setError(taskError)
 			if err := t.persistTask(ctx, exc.store, f.flowId, util.TaskSetError|util.TaskSetFinishStat); err != nil {
-				return wrapInternalError(fmt.Errorf("persisting task error: %s, task error:%w", err, taskError))
+				log.Printf("task(%s-%s) execution failed:%v, and status save failed \n", taskError, f.uuid, t.name)
 			}
+			//}
+
 			return taskError
 		} else {
+			//{
 			t.setStatus(StatusSuccess)
-			return wrapInternalError(t.persistTask(ctx, exc.store, f.flowId, util.TaskUpdateDefault|util.TaskSetFinishStat))
+			err := t.persistTask(ctx, exc.store, f.flowId, util.TaskUpdateDefault|util.TaskSetFinishStat)
+			if err != nil {
+				log.Printf("task(%s-%s) execution successful, but status save failed \n", f.uuid, t.name)
+				return nil
+			}
+			//}
+			return nil
 		}
 	} else {
-		// The task affects the executor causing the latter to exit unexpectedly
-		// or executor occurred an internal error
-		t.setStatus(StatusFailure)
-		t.setError(errors.New("task was terminated unexpectedly"))
-		err := t.persistTask(ctx, exc.store, f.flowId, util.TaskSetError|util.TaskSetFinishStat)
-		if err != nil {
-			return TaskRetryableError{err}
-		}
-		return nil
+		// This state is generally not present, and if it does, we can only assume that the task failed.
+		return errors.New("task failed unexpectedly, maybe task status has saved failed")
 	}
 }
 
 func (exc *Executor) runTask(ctx context.Context, f *Flow, t *Task) error {
-	var err error
 	for {
 		switch t.status {
 		case StatusPending:
 			t.setStatus(StatusRunning)
-			if err := t.persistTask(ctx, exc.store, f.flowId, util.TaskUpdateDefault); err != nil {
-				return TaskRetryableError{err}
+			err := t.persistTask(ctx, exc.store, f.flowId, util.TaskUpdateDefault)
+			if err != nil {
+				return internalError{err}
 			}
-			continue
 		case StatusRunning:
-			err = exc.dealTaskRunning(ctx, f, t)
+			err := exc.dealTaskRunning(ctx, f, t)
+			if err != nil {
+				return err
+			}
 		case StatusFailure:
-			return err
+			return nil
 		case StatusSuccess:
-			return err
+			return nil
 		}
 	}
 }
@@ -164,29 +168,26 @@ func (exc *Executor) dealPending(ctx context.Context, f *Flow) error {
 }
 
 func (exc *Executor) dealRunning(ctx context.Context, f *Flow) error {
-	orchestration := f.orchestration
-	store := exc.store
-	err := orchestration.Restore(f.state)
+	dbErr := f.persistStartRunningStat(ctx, exc.store)
+	if dbErr != nil {
+		return dbErr
+	}
+
+	err := f.orchestration.Restore(f.state)
 	if err != nil {
 		return err
 	}
 
-	dbErr := f.persistStartRunningStat(ctx, store)
-	if dbErr != nil {
-		//since this operation can't be succeed, so the following logic in this function can't.
-		return dbErr
-	}
-
-	var flowError error
+	var tes *taskErrorSanitation
 	for {
-		partialTasks := orchestration.Next()
+		partialTasks := f.orchestration.Next()
 		if partialTasks == nil {
 			break
 		}
 
 		f.updateSpawnedTasks(partialTasks)
 
-		tes := newTasksErrorSanitation()
+		tes = newTaskErrorsSanitation()
 
 		wg := &sync.WaitGroup{}
 		wg.Add(len(partialTasks))
@@ -195,94 +196,93 @@ func (exc *Executor) dealRunning(ctx context.Context, f *Flow) error {
 				defer wg.Done()
 				taskRunErr := exc.runTask(ctx, f, t)
 				if taskRunErr != nil {
-					if err, ok := taskRunErr.(TaskRetryableError); ok {
-						originErr := err.Unwrap()
-						tes.AddError(t.name, originErr)
-					} else if err, ok := taskRunErr.(TaskInternalError); ok {
-						originErr := err.Unwrap()
-						tes.AddError(t.name, originErr)
-					} else {
-						tes.AddError(t.name, taskRunErr)
-					}
+					tes.AddError(f.uuid+":"+t.name, taskRunErr)
 				}
 			}(task)
 		}
 		wg.Wait()
 
 		if tes.HasError() {
-			flowError = tes.GetErrors()
 			break
 		}
 	}
 
-	var status Status
-	if flowError != nil {
-		status = StatusFailure
-		log.Printf("flow error:%v\n", flowError)
-	} else {
-		status = StatusSuccess
-	}
+	if tes.HasError() {
+		if tes.HasInternalErrorOnly() {
+			//TODO only retry on corresponding task
+			return tes.GetErrors()
+		}
 
-	f.setStatus(status)
-	err = f.persistFlow(ctx, store, util.FlowUpdateDefault)
-	if err != nil {
-		if flowError == nil {
-			return err
-		} else {
-			return wrapInternalError(fmt.Errorf("an error occurred when persisting flow: %s, flow error:%w", err, flowError))
+		log.Printf("run flow got error:%v\n", tes.GetErrors())
+		f.setStatus(StatusFailure)
+		err := f.persistFlow(ctx, exc.store, util.FlowUpdateDefault)
+		if err != nil {
+			log.Printf("update flow to status(%v) error:%v\n", StatusFailure, err)
 		}
 	} else {
-		return flowError
-	}
-}
-
-func (exc *Executor) doEndRunningStat(ctx context.Context, f *Flow) error {
-	err := f.persistEndRunningStat(ctx, exc.store)
-	if err != nil {
-		return fmt.Errorf("save ending stat error:%w", err)
+		f.setStatus(StatusSuccess)
+		err := f.persistFlow(ctx, exc.store, util.FlowUpdateDefault)
+		if err != nil {
+			log.Printf("update flow to status(%v) error:%v\n", StatusSuccess, err)
+		}
 	}
 	return nil
 }
 
-func (exc *Executor) dealSuccess(ctx context.Context, f *Flow) (err error) {
-	defer func() { err = exc.doEndRunningStat(ctx, f) }()
+func (exc *Executor) dealSuccess(ctx context.Context, f *Flow) error {
 	flowContext := NewFlowContext(ctx, exc.store, f)
 	if f.scheme.OnSuccess != nil {
 		f.scheme.OnSuccess(flowContext)
 	}
 	exc.notifyAgent.TriggerFlowComplete(ctx.Value(contextMetaKey))
-	return err
+	exc.doCompleteStat(ctx, f)
+	return nil
 }
 
-func (exc *Executor) dealFailure(ctx context.Context, f *Flow) (err error) {
-	defer func() { err = exc.doEndRunningStat(ctx, f) }()
+func (exc *Executor) dealFailure(ctx context.Context, f *Flow) error {
 	flowContext := NewFlowContext(ctx, exc.store, f)
 	if f.scheme.OnFailure != nil {
 		f.scheme.OnFailure(flowContext)
 	}
 	exc.notifyAgent.TriggerFlowComplete(ctx.Value(contextMetaKey))
+	exc.doCompleteStat(ctx, f)
 	return nil
 }
 
-func (exc *Executor) spawn(ctx context.Context, f *Flow) error {
+func (exc *Executor) doCompleteStat(ctx context.Context, f *Flow) {
+	log.Printf("flow(%s-%s) complete: %s ", f.scheme.Name, f.uuid, f.status.String())
+	err := f.persistEndRunningStat(ctx, exc.store)
+	if err != nil {
+		log.Printf("save ending stat error:%v\n", err)
+	}
+}
+
+func (exc *Executor) spawn(ctx context.Context, f *Flow) {
 	for {
 		switch f.status {
 		case StatusPending:
 			if err := exc.dealPending(ctx, f); err != nil {
-				return err
+				log.Printf("flow(%s-%s) dealPending error:%v\n", f.scheme.Name, f.uuid, err)
+				return
 			}
 		case StatusRunning:
 			err := exc.dealRunning(ctx, f)
 			if err != nil {
-				log.Printf("flow dealRunning got an error: %v\n", err)
-				//if we don't sleep for a while, the flow FSM will be tight loop on StatusRunning
-				time.Sleep(time.Second * 3)
+				log.Printf("flow(%s-%s) dealRunning error: %v\n", f.scheme.Name, f.uuid, err)
+				return
 			}
-
 		case StatusFailure:
-			return exc.dealFailure(ctx, f)
+			err := exc.dealFailure(ctx, f)
+			if err != nil {
+				log.Printf("flow(%s-%s) dealRunning error: %v\n", f.scheme.Name, f.uuid, err)
+			}
+			return
 		case StatusSuccess:
-			return exc.dealSuccess(ctx, f)
+			err := exc.dealSuccess(ctx, f)
+			if err != nil {
+				log.Printf("flow(%s-%s) dealRunning error: %v\n", f.scheme.Name, f.uuid, err)
+			}
+			return
 		default:
 			panic("unknown flow status")
 		}
@@ -306,14 +306,13 @@ func (exc *Executor) run(ctx context.Context, meta *JobMeta) {
 		return
 	}
 
-	j, err := newFlow(obj)
-
+	f, err := newFlow(obj)
 	if err != nil {
 		log.Printf("create flow error:%v\n", err)
 		return
 	}
-	err = exc.spawn(ctx, j)
-	log.Printf("flow complete: %s ; error: %v\n", meta.uuid, err)
+
+	exc.spawn(ctx, f)
 }
 
 func (exc *Executor) Run(ctx context.Context, metaCh <-chan *JobMeta) {
