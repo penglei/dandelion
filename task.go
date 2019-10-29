@@ -27,7 +27,7 @@ func (t *Task) setStatus(status Status) {
 }
 
 func (t *Task) setHasBeenExecuted() {
-	t.executed = true //TODO stash
+	t.executed = true
 }
 
 func (t *Task) persistTask(ctx context.Context, store RuntimeStore, flowId int64, mask util.BitMask) error {

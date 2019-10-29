@@ -2,7 +2,6 @@ package theflow
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"git.code.oa.com/tke/theflow/database"
 	"git.code.oa.com/tke/theflow/util"
@@ -132,11 +131,20 @@ func (exc *Executor) dealTaskRunning(ctx context.Context, f *Flow, t *Task) erro
 		}
 	} else {
 		// This state is generally not present, and if it does, we can only assume that the task failed.
-		return errors.New("task failed unexpectedly, maybe task status has saved failed")
+		//{
+		err := fmt.Errorf("task(%s, %s) failed unexpectedly, maybe task original status has saved failed", f.uuid, t.name)
+		t.setStatus(StatusFailure)
+		t.setError(err)
+		if err := t.persistTask(ctx, exc.store, f.flowId, util.TaskSetError|util.TaskSetFinishStat); err != nil {
+			log.Printf("task(%s, %s) failure status save failed \n", f.uuid, t.name)
+		}
+		//}
+		return err
 	}
 }
 
 func (exc *Executor) runTask(ctx context.Context, f *Flow, t *Task) error {
+
 	for {
 		switch t.status {
 		case StatusPending:
@@ -168,6 +176,26 @@ func (exc *Executor) dealPending(ctx context.Context, f *Flow) error {
 	return err
 }
 
+func (exc *Executor) restoreTasks(ctx context.Context, f *Flow, tasks []*Task) error {
+
+	taskDataPtrs, err := exc.store.LoadFlowTasks(ctx, f.flowId)
+	if err != nil {
+		return err
+	}
+
+	namedCache := make(map[string]*database.TaskDataObject)
+	for _, item := range taskDataPtrs {
+		namedCache[item.Name] = item
+	}
+
+	for _, t := range tasks {
+		if data, ok := namedCache[t.name]; ok {
+			t.executed = data.Executed
+		}
+	}
+	return nil
+}
+
 func (exc *Executor) dealRunning(ctx context.Context, f *Flow) error {
 	dbErr := f.persistStartRunningStat(ctx, exc.store)
 	if dbErr != nil {
@@ -186,7 +214,12 @@ func (exc *Executor) dealRunning(ctx context.Context, f *Flow) error {
 			break
 		}
 
+		//taskRun can update these tasks by pointer
 		f.updateSpawnedTasks(partialTasks)
+
+		if err := exc.restoreTasks(ctx, f, partialTasks); err != nil {
+			return err
+		}
 
 		tes = newTaskErrorsSanitation()
 
@@ -218,7 +251,7 @@ func (exc *Executor) dealRunning(ctx context.Context, f *Flow) error {
 		f.setStatus(StatusFailure)
 		err := f.persistFlow(ctx, exc.store, util.FlowUpdateDefault)
 		if err != nil {
-			log.Printf("update flow to status(%v) error:%v\n", StatusFailure, err)
+			log.Printf("update flow to status(%v) failed:%v\n", StatusFailure, err)
 		}
 	} else {
 		f.setStatus(StatusSuccess)

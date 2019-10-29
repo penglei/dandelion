@@ -210,6 +210,10 @@ func (ms *mysqlStore) CreateJobEvent(ctx context.Context, meta *database.JobMeta
 	return nil
 }
 
+func (ms mysqlStore) QueryJobFlows(ctx context.Context, userId, class string) ([]*database.FlowDataObject, error) {
+	return nil, nil
+}
+
 func (ms *mysqlStore) DeleteJobEvent(ctx context.Context, uuid string) error {
 	tx, err := ms.db.Begin()
 	if err != nil {
@@ -233,19 +237,28 @@ func (ms *mysqlStore) DeleteJobEvent(ctx context.Context, uuid string) error {
 	return tx.Commit()
 }
 
-func (ms *mysqlStore) SetFlowStartTime(ctx context.Context, flowId int64) error {
-	updateSql := "update flow set `started_at` = now where"
-	tx, err := ms.db.Begin()
+func (ms *mysqlStore) LoadFlowTasks(ctx context.Context, flowId int64) ([]*database.TaskDataObject, error) {
+	querySql := "SELECT `name`, `status`, `executed` FROM flow_task WHERE flow_id = ?"
+	rows, err := ms.db.QueryContext(ctx, querySql, flowId)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	defer tx.Rollback()
+	defer rows.Close()
 
-	_, err = tx.ExecContext(ctx, updateSql, flowId)
-	if err != nil {
-		return err
+	results := make([]*database.TaskDataObject, 0)
+	for rows.Next() {
+		td := &database.TaskDataObject{
+			FlowID: flowId,
+		}
+		var executed int
+		if err := rows.Scan(&td.Name, &td.Status, &executed); err != nil {
+			return nil, err
+		}
+		td.Executed = executed == 1
+		results = append(results, td)
 	}
-	return tx.Commit()
+
+	return results, nil
 }
 
 var _ database.RuntimeStore = &mysqlStore{}

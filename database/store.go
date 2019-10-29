@@ -36,6 +36,7 @@ type TaskDataObject struct {
 	Name     string
 	Status   TypeStatusRaw
 	ErrorMsg string
+	Executed bool
 	//StartedAt *time.Time
 	//EndedAt   *time.Time
 }
@@ -47,7 +48,7 @@ type RuntimeStore interface {
 	GetOrCreateFlow(context.Context, FlowDataPartial) (FlowDataObject, error)
 	CreatePendingFlow(context.Context, FlowDataPartial) error
 	UpdateFlow(ctx context.Context, obj FlowDataObject, agentName string, mask util.BitMask) error
-	SetFlowStartTime(ctx context.Context, flowId int64) error
 	SaveFlowStorage(ctx context.Context, flowId int64, data []byte) error
 	UpsertFlowTask(ctx context.Context, taskData TaskDataObject, mask util.BitMask) error
+	LoadFlowTasks(ctx context.Context, flowId int64) ([]*TaskDataObject, error)
 }

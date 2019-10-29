@@ -211,7 +211,7 @@ func (rt *Runtime) CreateJob(ctx context.Context, user string, class FlowClass, 
 	return nil
 }
 
-func (rt *Runtime) FindJob(ctx context.Context, user string, class FlowClass) {
+func (rt *Runtime) FindJobs(ctx context.Context, user string, class FlowClass) {
 
 }
 
