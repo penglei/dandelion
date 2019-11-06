@@ -1,6 +1,6 @@
-package theflow
+package dandelion
 
-import "git.code.oa.com/tke/theflow/database"
+import "github.com/penglei/dandelion/database"
 
 type Status database.TypeStatusRaw
 

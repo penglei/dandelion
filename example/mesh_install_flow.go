@@ -1,19 +1,19 @@
 package main
 
 import (
-	"git.code.oa.com/tke/theflow"
+	"github.com/penglei/dandelion"
 	"github.com/pborman/uuid"
 	"log"
 	"time"
 )
 
 const (
-	FlowClassInstall = theflow.FlowClass("istio_install")
+	FlowClassInstall = dandelion.FlowClass("istio_install")
 )
 
-type Context = theflow.Context
-type TaskScheme = theflow.TaskScheme
-type TaskFn = theflow.TaskFn
+type Context = dandelion.Context
+type TaskScheme = dandelion.TaskScheme
+type TaskFn = dandelion.TaskFn
 
 type InstallMeshStorage struct {
 	MeshName  string `json:"meshName"`
@@ -31,16 +31,16 @@ func RegisterJobFlow(job *meshInstallJob) {
 		Task: TaskFn(job.SecondTask),
 	}
 
-	installMeshFlow := &theflow.FlowScheme{
+	installMeshFlow := &dandelion.FlowScheme{
 		Name:       FlowClassInstall,
 		NewStorage: func() interface{} { return &InstallMeshStorage{} },
-		Tasks:      theflow.NewChainedTasks([]TaskScheme{t1, t2}),
-		OnFailure: func(ctx theflow.Context) {
+		Tasks:      dandelion.NewChainedTasks([]TaskScheme{t1, t2}),
+		OnFailure: func(ctx dandelion.Context) {
 			log.Printf("failure, storage:%v\n", ctx.Global())
 		},
 	}
 
-	theflow.Register(installMeshFlow)
+	dandelion.Register(installMeshFlow)
 
 }
 

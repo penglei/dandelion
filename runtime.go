@@ -1,4 +1,4 @@
-package theflow
+package dandelion
 
 import (
 	"container/list"
@@ -6,9 +6,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"git.code.oa.com/tke/theflow/database"
-	"git.code.oa.com/tke/theflow/database/mysql"
-	"git.code.oa.com/tke/theflow/ratelimit"
+	"github.com/penglei/dandelion/database"
+	"github.com/penglei/dandelion/database/mysql"
+	"github.com/penglei/dandelion/ratelimit"
 	"github.com/pborman/uuid"
 	"log"
 	"sync"

@@ -4,8 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"git.code.oa.com/tke/theflow/database"
-	"git.code.oa.com/tke/theflow/util"
+	"github.com/penglei/dandelion/database"
+	"github.com/penglei/dandelion/util"
 )
 
 type mysqlStore struct {

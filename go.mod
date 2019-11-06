@@ -1,4 +1,4 @@
-module git.code.oa.com/tke/theflow
+module github.com/penglei/dandelion
 
 go 1.13
 

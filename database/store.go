@@ -2,7 +2,7 @@ package database
 
 import (
 	"context"
-	"git.code.oa.com/tke/theflow/util"
+	"github.com/penglei/dandelion/util"
 	_ "github.com/go-sql-driver/mysql"
 )
 

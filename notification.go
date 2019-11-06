@@ -1,4 +1,4 @@
-package theflow
+package dandelion
 
 type NotificationAgent struct {
 	flowCompleteCallbacks []func(interface{})

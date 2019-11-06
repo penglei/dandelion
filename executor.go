@@ -1,10 +1,10 @@
-package theflow
+package dandelion
 
 import (
 	"context"
 	"fmt"
-	"git.code.oa.com/tke/theflow/database"
-	"git.code.oa.com/tke/theflow/util"
+	"github.com/penglei/dandelion/database"
+	"github.com/penglei/dandelion/util"
 	"go.uber.org/atomic"
 	"log"
 	"strings"

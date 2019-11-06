@@ -4,8 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"git.code.oa.com/tke/theflow"
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/penglei/dandelion"
 	"os"
 )
 
@@ -63,7 +63,7 @@ func main() {
 		meshStorage := InstallMeshStorage{
 			MeshTitle: "test mesh installing",
 		}
-		flowRuntime := theflow.NewDefaultRuntime("", db)
+		flowRuntime := dandelion.NewDefaultRuntime("", db)
 		err = flowRuntime.CreateJob(ctx, user, FlowClassInstall, meshStorage)
 		if err != nil {
 			panic(err)
@@ -74,7 +74,7 @@ func main() {
 			agentName = os.Args[2]
 		}
 
-		flowRuntime := theflow.NewDefaultRuntime(agentName, db)
+		flowRuntime := dandelion.NewDefaultRuntime(agentName, db)
 		err = flowRuntime.Bootstrap(ctx)
 		if err != nil {
 			panic(err)

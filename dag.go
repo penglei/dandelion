@@ -1,7 +1,7 @@
-package theflow
+package dandelion
 
 type taskNode struct {
-	Nexis []*taskNode
+	Follows []*taskNode
 }
 type DAGFlowTask struct {
 	Heads []*taskNode

@@ -1,4 +1,4 @@
-package theflow
+package dandelion
 
 type JobMeta struct {
 	id     int64 //must be total order

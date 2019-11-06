@@ -1,8 +1,8 @@
-package theflow
+package dandelion
 
 import (
 	"encoding/json"
-	"git.code.oa.com/tke/theflow/database"
+	"github.com/penglei/dandelion/database"
 )
 
 type flowPlanStateSerializable struct {
