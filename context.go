@@ -47,7 +47,7 @@ func (ctx *flowContext) Save() error {
 	}
 
 	// it needn't to throw out the err.
-	// as flow has cached storage, flow task can continue to run.
+	// as flow has cached storage data, flow can continue to run correctly in the future.
 	return nil
 }
 

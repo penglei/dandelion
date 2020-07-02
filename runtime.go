@@ -6,10 +6,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/pborman/uuid"
 	"github.com/penglei/dandelion/database"
 	"github.com/penglei/dandelion/database/mysql"
 	"github.com/penglei/dandelion/ratelimit"
-	"github.com/pborman/uuid"
 	"log"
 	"sync"
 	"time"
@@ -18,8 +18,8 @@ import (
 type EventQueue = ratelimit.EventQueue
 
 const (
-	JobPullInterval      = time.Second * 3
-	QueueLockGranularity = "job_queue"
+	PollInterval         = time.Second * 3
+	QueueLockGranularity = "queue"
 	LockHeartbeat        = time.Second * 3
 )
 
@@ -56,7 +56,7 @@ func (m *FlowShapingManager) Remove(key string) {
 	m.mutex.Unlock()
 }
 
-func (m *FlowShapingManager) PickOutAll() []*JobMeta {
+func (m *FlowShapingManager) PickOutAll() []*FlowMeta {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
@@ -65,14 +65,14 @@ func (m *FlowShapingManager) PickOutAll() []*JobMeta {
 		events = append(events, q.PickOut()...)
 	}
 
-	metas := make([]*JobMeta, 0, len(events))
+	metas := make([]*FlowMeta, 0, len(events))
 	for _, e := range events {
-		metas = append(metas, e.(*JobMeta))
+		metas = append(metas, e.(*FlowMeta))
 	}
 	return metas
 }
 
-func (m *FlowShapingManager) Commit(key string, meta *JobMeta) {
+func (m *FlowShapingManager) Commit(key string, meta *FlowMeta) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
@@ -82,7 +82,7 @@ func (m *FlowShapingManager) Commit(key string, meta *JobMeta) {
 	}
 }
 
-func (m *FlowShapingManager) Rollback(key string, meta *JobMeta) {
+func (m *FlowShapingManager) Rollback(key string, meta *FlowMeta) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
@@ -100,49 +100,52 @@ func NewShapingManager() *FlowShapingManager {
 }
 
 type Runtime struct {
-	ctx                    context.Context
-	name                   string
-	store                  RuntimeStore
-	lockGranularity        string
-	checkInterval          time.Duration
-	errorCount             int
-	lockManipulator        LockManipulator
-	lockManipulatorBuilder func() (LockManipulator, error)
-	lmMutex                sync.RWMutex
-	eventCh                chan *JobMeta
-	shapingManager         *FlowShapingManager
-	executors              []*Executor
-	workerNum              int
+	ctx              context.Context
+	name             string //name(consumer or producer)
+	store            RuntimeStore
+	lockGranularity  string
+	checkInterval    time.Duration
+	errorCount       int
+	lockAgent        LockAgent
+	lockAgentBuilder func() (LockAgent, error)
+	lockAgentMutex   sync.RWMutex
+	eventCh          chan *FlowMeta
+	shapingManager   *FlowShapingManager
+	executors        []*Executor
+	workerNum        int
 }
 
 func NewDefaultRuntime(name string, db *sql.DB) *Runtime {
-	store := mysql.BuildRuntimeStore(db)
-	lmBuilder := func() (LockManipulator, error) {
-		return mysql.BuildMySQLLockManipulator(db, name, LockHeartbeat)
+	if name == "" {
+		name = "default"
 	}
-	runtime := NewRuntime(name, store, lmBuilder)
+	store := mysql.BuildRuntimeStore(db)
+	laBuilder := func() (LockAgent, error) {
+		return mysql.BuildMySQLLockAgent(db, name, LockHeartbeat)
+	}
+	runtime := NewRuntime(name, store, laBuilder)
 
 	return runtime
 }
 
-func NewRuntime(name string, store RuntimeStore, lmBuilder func() (LockManipulator, error)) *Runtime {
-	lm, err := lmBuilder()
+func NewRuntime(name string, store RuntimeStore, laBuilder func() (LockAgent, error)) *Runtime {
+	la, err := laBuilder()
 	if err != nil {
 		panic(err)
 	}
 	return &Runtime{
-		name:                   name,
-		store:                  store,
-		lockGranularity:        QueueLockGranularity,
-		checkInterval:          JobPullInterval,
-		errorCount:             0,
-		lockManipulator:        lm,
-		lockManipulatorBuilder: lmBuilder,
-		lmMutex:                sync.RWMutex{},
-		eventCh:                make(chan *JobMeta),
-		shapingManager:         NewShapingManager(),
-		executors:              make([]*Executor, 0),
-		workerNum:              4,
+		name:             name,
+		store:            store,
+		lockGranularity:  QueueLockGranularity,
+		checkInterval:    PollInterval,
+		errorCount:       0,
+		lockAgent:        la,
+		lockAgentBuilder: laBuilder,
+		lockAgentMutex:   sync.RWMutex{},
+		eventCh:          make(chan *FlowMeta),
+		shapingManager:   NewShapingManager(),
+		executors:        make([]*Executor, 0),
+		workerNum:        4,
 	}
 }
 
@@ -153,23 +156,23 @@ func (rt *Runtime) SetWorkerNum(n int) {
 //bootstrap event consumer and flow executor
 func (rt *Runtime) Bootstrap(ctx context.Context) error {
 	rt.ctx = ctx
-	err := rt.lockManipulator.Bootstrap(rt.ctx, rt.onLockManipulatorError)
+	err := rt.lockAgent.Bootstrap(rt.ctx, rt.onLockAgentError)
 	if err != nil {
 		return err
 	}
 
 	go func() {
-		err := rt.iterateJobs(ctx)
+		err := rt.iterate(ctx)
 		if err != nil {
-			log.Printf("job events dispatcher exit error: %v", err)
+			log.Printf("flow dispatcher exit error: %v", err)
 			return
 		}
-		log.Printf("job events dispatcher has exited!\n")
+		log.Printf("flow dispatcher has exited!\n")
 	}()
 
-	notifyAgent := &NotificationAgent{}
-	notifyAgent.RegisterFlowComplete(rt.onJobComplete)
-	notifyAgent.RegisterFlowRetry(rt.onJobRetry)
+	notifyAgent := &Notifier{}
+	notifyAgent.RegisterFlowComplete(rt.onFlowComplete)
+	notifyAgent.RegisterFlowRetry(rt.onFlowRetry)
 
 	for i := 0; i < rt.workerNum; i += 1 {
 		executor := NewExecutor(rt.name, notifyAgent, rt.store)
@@ -182,14 +185,14 @@ func (rt *Runtime) Bootstrap(ctx context.Context) error {
 	return nil
 }
 
-func (rt *Runtime) CreateJob(ctx context.Context, user string, class FlowClass, jsonSerializableData interface{}) error {
+func (rt *Runtime) Submit(ctx context.Context, user string, class FlowClass, jsonSerializableData interface{}) error {
 	//TODO check jsonSerializableData is Storage Type
 
 	data, err := json.Marshal(jsonSerializableData)
 	if err != nil {
 		return err
 	}
-	dbJobMeta := database.JobMetaObject{
+	dbFlowMeta := database.FlowMetaObject{
 		UUID:   uuid.New(),
 		UserID: user,
 		Class:  class.Raw(),
@@ -197,33 +200,33 @@ func (rt *Runtime) CreateJob(ctx context.Context, user string, class FlowClass, 
 	}
 
 	//save it
-	err = rt.store.CreateJobEvent(ctx, &dbJobMeta)
+	err = rt.store.CreateFlowMeta(ctx, &dbFlowMeta)
 	if err != nil {
 		return err
 	}
 
 	//pre-creating pending flow that can be visible for querying as soon as possible
-	err = birthPendingFlow(ctx, rt.store, dbJobMeta.UUID, dbJobMeta.UserID, class, dbJobMeta.Data)
+	err = birthPendingFlow(ctx, rt.store, dbFlowMeta.UUID, dbFlowMeta.UserID, class, dbFlowMeta.Data)
 	if err != nil {
-		log.Printf("precreating pending job error:%v", err)
+		log.Printf("precreating pending flow error:%v", err)
 	}
 
 	return nil
 }
 
-func (rt *Runtime) FindJobs(ctx context.Context, user string, class FlowClass) {
+func (rt *Runtime) Find(ctx context.Context, user string, class FlowClass) {
 
 }
 
-func (rt *Runtime) fetchAllJobEvents(ctx context.Context) ([]*JobMeta, error) {
-	objects, err := rt.store.LoadUncommittedJobEvents(ctx)
+func (rt *Runtime) fetchAllFlyingFlows(ctx context.Context) ([]*FlowMeta, error) {
+	objects, err := rt.store.LoadUncommittedFlowMeta(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	metas := make([]*JobMeta, 0)
+	metas := make([]*FlowMeta, 0)
 	for _, obj := range objects {
-		metas = append(metas, &JobMeta{
+		metas = append(metas, &FlowMeta{
 			id:     obj.ID,
 			uuid:   obj.UUID,
 			UserID: obj.UserID,
@@ -234,19 +237,19 @@ func (rt *Runtime) fetchAllJobEvents(ctx context.Context) ([]*JobMeta, error) {
 	return metas, nil
 }
 
-func (rt *Runtime) iterateJobs(ctx context.Context) error {
+func (rt *Runtime) iterate(ctx context.Context) error {
 	ticker := time.NewTicker(rt.checkInterval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ticker.C:
-			metas, err := rt.fetchAllJobEvents(ctx)
+			metas, err := rt.fetchAllFlyingFlows(ctx)
 			if err != nil {
 				rt.errorCount += 1
-				log.Printf("pulling job error:%v, errorCount=%d\n", err, rt.errorCount)
+				log.Printf("pulling flowmeta error:%v, errorCount=%d\n", err, rt.errorCount)
 			} else {
 				rt.errorCount = 0
-				rt.dispatchJobEvents(ctx, metas)
+				rt.dispatch(ctx, metas)
 			}
 		case <-ctx.Done():
 			return nil
@@ -254,9 +257,9 @@ func (rt *Runtime) iterateJobs(ctx context.Context) error {
 	}
 }
 
-func (rt *Runtime) onLockManipulatorError(reason error) {
+func (rt *Runtime) onLockAgentError(reason error) {
 	//TODO pause/stop all executors
-	fmt.Printf("!!!!!!!!!! lock connection lost. error : %v\n", reason)
+	fmt.Printf("!!! lock agent connection lost. error : %v\n", reason)
 
 	ticker := time.NewTicker(time.Second * 5)
 	defer ticker.Stop()
@@ -265,49 +268,49 @@ func (rt *Runtime) onLockManipulatorError(reason error) {
 		case <-rt.ctx.Done():
 			return
 		case <-ticker.C:
-			log.Printf("!!!!!!!!!! rebuilding runtime LockManipulator..")
-			lockManipulator, err := rt.lockManipulatorBuilder()
+			log.Printf("!!! rebuilding runtime LockAgent..")
+			lockAgent, err := rt.lockAgentBuilder()
 			if err != nil {
-				log.Printf("!!!!!!!!!! rebuilding lock manipulator error: %v\n", err)
+				log.Printf("!!! rebuilding lock agent error: %v\n", err)
 				continue
 			}
-			if err = lockManipulator.Bootstrap(rt.ctx, rt.onLockManipulatorError); err != nil {
-				log.Printf("!!!!!!!!!!  manipulator bootstrap error: %v \n", err)
+			if err = lockAgent.Bootstrap(rt.ctx, rt.onLockAgentError); err != nil {
+				log.Printf("!!! lock agent bootstrap error: %v \n", err)
 				continue
 			}
-			rt.lmMutex.Lock()
-			rt.lockManipulator = lockManipulator
-			rt.lmMutex.Unlock()
+			rt.lockAgentMutex.Lock()
+			rt.lockAgent = lockAgent
+			rt.lockAgentMutex.Unlock()
 			//TODO resume all executors
 			return
 		}
 	}
 }
 
-func (rt *Runtime) onJobComplete(item interface{}) {
-	meta := item.(*JobMeta)
-	key := rt.getJobQueueName(meta)
+func (rt *Runtime) onFlowComplete(item interface{}) {
+	meta := item.(*FlowMeta)
+	key := rt.getQueueName(meta)
 	rt.shapingManager.Commit(key, meta)
 
-	err := rt.store.DeleteJobEvent(rt.ctx, meta.uuid)
+	err := rt.store.DeleteFlowMeta(rt.ctx, meta.uuid)
 	if err != nil {
-		log.Printf("delete job event failed: %v\n", err)
+		log.Printf("delete flow meta failed: %v\n", err)
 	}
 	rt.forward()
 }
 
-func (rt *Runtime) onJobRetry(item interface{}) {
-	meta := item.(*JobMeta)
-	key := rt.getJobQueueName(meta)
+func (rt *Runtime) onFlowRetry(item interface{}) {
+	meta := item.(*FlowMeta)
+	key := rt.getQueueName(meta)
 	rt.shapingManager.Rollback(key, meta)
 }
 
-func (rt *Runtime) dispatchJobEvents(ctx context.Context, metas []*JobMeta) {
+func (rt *Runtime) dispatch(ctx context.Context, metas []*FlowMeta) {
 	eventsMapQueue := make(map[string]EventQueue)
 
 	for _, event := range metas {
 
-		queueName := rt.getJobQueueName(event)
+		queueName := rt.getQueueName(event)
 
 		userClassQueue, ok := eventsMapQueue[queueName]
 		if !ok {
@@ -318,9 +321,10 @@ func (rt *Runtime) dispatchJobEvents(ctx context.Context, metas []*JobMeta) {
 	}
 
 	ownedMapQueue := make(map[string]EventQueue)
-	rt.lmMutex.RLock()
+	rt.lockAgentMutex.RLock()
+	defer rt.lockAgentMutex.RUnlock()
 	for queueName, queue := range eventsMapQueue {
-		locked, err := rt.lockManipulator.AcquireLock(ctx, queueName)
+		locked, err := rt.lockAgent.AcquireLock(ctx, queueName)
 		if err != nil {
 			log.Printf("acquire lock(%s) error:%v\n", queueName, err)
 			continue
@@ -331,14 +335,13 @@ func (rt *Runtime) dispatchJobEvents(ctx context.Context, metas []*JobMeta) {
 		}
 		ownedMapQueue[queueName] = queue
 	}
-	rt.lmMutex.RUnlock()
 
 	rt.shapingManager.AddQueues(ownedMapQueue)
 
 	rt.forward()
 }
 
-func (rt *Runtime) getJobQueueName(meta *JobMeta) string {
+func (rt *Runtime) getQueueName(meta *FlowMeta) string {
 	queueName := fmt.Sprintf("%s:%s:%s", rt.lockGranularity, meta.UserID, meta.class)
 	return queueName
 }

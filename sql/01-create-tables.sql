@@ -9,7 +9,7 @@ use tke_mesh;
 -- #   AUTO_INCREMENT = 1
 -- #   DEFAULT CHARSET = utf8mb4;
 
-CREATE TABLE job_event (
+CREATE TABLE flow_meta (
     `id`            BIGINT(11)  NOT NULL AUTO_INCREMENT,
     `uuid`          CHAR(36) NOT NULL DEFAULT '',
     `userid`        CHAR(32) NOT NULL DEFAULT '',
@@ -20,7 +20,7 @@ CREATE TABLE job_event (
     `deleted_flag`  BIGINT(11)  NOT NULL DEFAULT 0, -- TODO not implement
     PRIMARY KEY (`id`),
     KEY `idx_user_class_queue` (`userid`, `class`),
-    UNIQUE KEY `idx_job_uuid` (`uuid`)
+    UNIQUE KEY `idx_flow_meta_uuid` (`uuid`)
 )
     AUTO_INCREMENT = 1
     DEFAULT CHARSET = utf8mb4;
@@ -39,13 +39,12 @@ create table lock_timer (
 
 CREATE TABLE flow (
     `id`                BIGINT(11)  NOT NULL AUTO_INCREMENT,
-    `event_uuid`        CHAR(36) NOT NULL DEFAULT '',
+    `uuid`              CHAR(36) NOT NULL DEFAULT '',
     `userid`            CHAR(32) NOT NULL DEFAULT '',
     `class`             CHAR(32) NOT NULL DEFAULT '',
     `storage`           TEXT NOT NULL,
     `status`            CHAR(16) NOT NULL DEFAULT '',  -- pending, running, success, failure
     `state`             TEXT NOT NULL,
-    -- `job_created_at`    TIMESTAMP NOT NULL, -- TODO
     `running_cnt`       INT(11) NOT NULL DEFAULT 0,
     `started_at`        TIMESTAMP DEFAULT NULL,
     `ended_at`          TIMESTAMP DEFAULT NULL,
@@ -53,7 +52,7 @@ CREATE TABLE flow (
     `created_at`        TIMESTAMP NOT NULL DEFAULT NOW(),
     `deleted_at`        TIMESTAMP DEFAULT NULL,
     `deleted_flag`      BIGINT(11)  NOT NULL DEFAULT 0, -- TODO not implement
-    UNIQUE KEY `idx_job_event_uuid` (`event_uuid`),
+    UNIQUE KEY `idx_flow_uuid` (`uuid`),
     PRIMARY KEY (`id`)
 )
     AUTO_INCREMENT = 1
@@ -74,10 +73,10 @@ CREATE TABLE flow_task (
     AUTO_INCREMENT = 1
     DEFAULT CHARSET = utf8mb4;
 
--- CREATE TABLE job_user_limit (
+-- CREATE TABLE user_limit (
 --     `id`                BIGINT(11)  NOT NULL AUTO_INCREMENT,
 --     `userid`            CHAR(32) NOT NULL DEFAULT '',
---     `job_concurrency`   SMALLINT(5) NOT NULL DEFAULT 2,
+--     `concurrency`   SMALLINT(5) NOT NULL DEFAULT 2,
 -- )
 --     AUTO_INCREMENT = 1
 --     DEFAULT CHARSET = utf8mb4;

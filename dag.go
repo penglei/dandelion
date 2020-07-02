@@ -1,10 +1,10 @@
 package dandelion
 
-type taskNode struct {
-	Follows []*taskNode
+type stepNode struct {
+	Follows []*stepNode
 }
 type DAGFlowTask struct {
-	Heads []*taskNode
+	Heads []*stepNode
 }
 
 func (d *DAGFlowTask) Prepare(state *FlowExecPlanState) {

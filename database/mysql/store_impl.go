@@ -12,17 +12,17 @@ type mysqlStore struct {
 	db *sql.DB
 }
 
-func (ms *mysqlStore) LoadUncommittedJobEvents(ctx context.Context) ([]*database.JobMetaObject, error) {
-	querySql := "SELECT `id`, `uuid`, `userid`, `class`, `data` FROM job_event WHERE `deleted_at` is NULL ORDER BY `id`"
+func (ms *mysqlStore) LoadUncommittedFlowMeta(ctx context.Context) ([]*database.FlowMetaObject, error) {
+	querySql := "SELECT `id`, `uuid`, `userid`, `class`, `data` FROM flow_meta WHERE `deleted_at` is NULL ORDER BY `id`"
 	rows, err := ms.db.QueryContext(ctx, querySql)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	results := make([]*database.JobMetaObject, 0)
+	results := make([]*database.FlowMetaObject, 0)
 	for rows.Next() {
-		obj := &database.JobMetaObject{}
+		obj := &database.FlowMetaObject{}
 		if err := rows.Scan(&obj.ID, &obj.UUID, &obj.UserID, &obj.Class, &obj.Data); err != nil {
 			return nil, err
 		}
@@ -41,11 +41,11 @@ func (ms *mysqlStore) GetOrCreateFlow(ctx context.Context, data database.FlowDat
 
 	obj.FlowDataPartial = data
 
-	querySql := "SELECT id, storage, status, state, running_cnt FROM flow WHERE event_uuid = ?"
+	querySql := "SELECT id, storage, status, state, running_cnt FROM flow WHERE uuid = ?"
 	err = tx.QueryRowContext(ctx, querySql, data.EventUUID).Scan(&obj.ID, &obj.Storage, &obj.Status, &obj.State, &obj.RunningCnt)
 	if IsNoRowsError(err) {
 		var id int64
-		id, err = createPendingJobFlow(ctx, tx, &data)
+		id, err = createPendingFlow(ctx, tx, &data)
 		if err != nil {
 			return
 		}
@@ -56,9 +56,9 @@ func (ms *mysqlStore) GetOrCreateFlow(ctx context.Context, data database.FlowDat
 	return
 }
 
-func createPendingJobFlow(ctx context.Context, tx *sql.Tx, data *database.FlowDataPartial) (int64, error) {
+func createPendingFlow(ctx context.Context, tx *sql.Tx, data *database.FlowDataPartial) (int64, error) {
 	//XXX state is empty now, executor will initialize it.
-	createSql := "INSERT INTO flow (event_uuid, userid, class, status, storage, state) VALUES (?, ?, ?, ?, ?, ?)"
+	createSql := "INSERT INTO flow (uuid, userid, class, status, storage, state) VALUES (?, ?, ?, ?, ?, ?)"
 	result, err := tx.ExecContext(ctx, createSql, data.EventUUID, data.UserID, data.Class, data.Status, data.Storage, data.State)
 	if err != nil {
 		return 0, err
@@ -75,7 +75,7 @@ func (ms *mysqlStore) CreatePendingFlow(
 		return err
 	}
 	defer tx.Rollback()
-	_, err = createPendingJobFlow(ctx, tx, &data)
+	_, err = createPendingFlow(ctx, tx, &data)
 	if err != nil {
 		return err
 	}
@@ -184,14 +184,14 @@ func (ms *mysqlStore) UpsertFlowTask(ctx context.Context, data database.TaskData
 	return tx.Commit()
 }
 
-func (ms *mysqlStore) CreateJobEvent(ctx context.Context, meta *database.JobMetaObject) error {
+func (ms *mysqlStore) CreateFlowMeta(ctx context.Context, meta *database.FlowMetaObject) error {
 	tx, err := ms.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	insertSql := "INSERT INTO job_event (uuid, userid, class, data) VALUES (?, ?, ?, ?)"
+	insertSql := "INSERT INTO flow_meta (uuid, userid, class, data) VALUES (?, ?, ?, ?)"
 
 	result, err := tx.ExecContext(ctx, insertSql, meta.UUID, meta.UserID, meta.Class, meta.Data)
 	if err != nil {
@@ -210,18 +210,14 @@ func (ms *mysqlStore) CreateJobEvent(ctx context.Context, meta *database.JobMeta
 	return nil
 }
 
-func (ms mysqlStore) QueryJobFlows(ctx context.Context, userId, class string) ([]*database.FlowDataObject, error) {
-	return nil, nil
-}
-
-func (ms *mysqlStore) DeleteJobEvent(ctx context.Context, uuid string) error {
+func (ms *mysqlStore) DeleteFlowMeta(ctx context.Context, uuid string) error {
 	tx, err := ms.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	deleteSql := "DELETE FROM job_event WHERE uuid = ?"
+	deleteSql := "DELETE FROM flow_meta WHERE uuid = ?"
 
 	result, err := tx.ExecContext(ctx, deleteSql, uuid)
 	if err != nil {

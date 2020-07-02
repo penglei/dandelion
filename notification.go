@@ -1,26 +1,26 @@
 package dandelion
 
-type NotificationAgent struct {
+type Notifier struct {
 	flowCompleteCallbacks []func(interface{})
 	flowRetryCallbacks    []func(interface{})
 }
 
-func (e *NotificationAgent) TriggerFlowComplete(meta interface{}) {
+func (e *Notifier) TriggerFlowComplete(meta interface{}) {
 	for _, cb := range e.flowCompleteCallbacks {
 		cb(meta)
 	}
 }
 
-func (e *NotificationAgent) TriggerFlowRetry(meta interface{}) {
+func (e *Notifier) TriggerFlowRetry(meta interface{}) {
 	for _, cb := range e.flowRetryCallbacks {
 		cb(meta)
 	}
 }
 
-func (e *NotificationAgent) RegisterFlowComplete(cb func(meta interface{})) {
+func (e *Notifier) RegisterFlowComplete(cb func(meta interface{})) {
 	e.flowCompleteCallbacks = append(e.flowCompleteCallbacks, cb)
 }
 
-func (e *NotificationAgent) RegisterFlowRetry(cb func(meta interface{})) {
+func (e *Notifier) RegisterFlowRetry(cb func(meta interface{})) {
 	e.flowRetryCallbacks = append(e.flowRetryCallbacks, cb)
 }

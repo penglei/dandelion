@@ -9,14 +9,14 @@ func (c FlowClass) Raw() string {
 }
 
 func FlowClassFromRaw(s string) FlowClass {
-	//TODO Checking
+	//TODO Check
 	return FlowClass(s)
 }
 
 type FlowScheme struct {
 	Name       FlowClass //class
 	NewStorage func() interface{}
-	Tasks      func() TaskOrchestration
+	Steps      func() TaskOrchestration
 	//TODO
 	//OnRunning  func(Context) //call before entering running status
 	//OnCreating func(Context) //first running
@@ -26,7 +26,7 @@ type FlowScheme struct {
 }
 
 func (f *FlowScheme) NewOrchestration() TaskOrchestration {
-	return f.Tasks()
+	return f.Steps()
 }
 
 //TaskOrchestration is associated with each flow(tasks) definition,

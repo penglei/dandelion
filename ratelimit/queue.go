@@ -4,13 +4,13 @@ import (
 	"fmt"
 )
 
-type QueuedJobThrottle struct {
+type QueuedThrottle struct {
 	lastOffset    int64
 	runningOffset int64
 	queue         EventQueue
 }
 
-func (q *QueuedJobThrottle) MergeInto(queue EventQueue) {
+func (q *QueuedThrottle) MergeInto(queue EventQueue) {
 	newBack := queue.Back().Value.(Event)
 	if newBack.GetOffset() <= q.lastOffset {
 		//no new queue
@@ -19,7 +19,6 @@ func (q *QueuedJobThrottle) MergeInto(queue EventQueue) {
 
 	newFront := queue.Front().Value.(Event)
 	if newFront.GetOffset() > q.lastOffset {
-		//new job and no dealing job
 		q.queue.PushBackList(queue)
 		q.lastOffset = q.queue.Back().Value.(Event).GetOffset()
 		return
@@ -34,7 +33,7 @@ func (q *QueuedJobThrottle) MergeInto(queue EventQueue) {
 	q.lastOffset = q.queue.Back().Value.(Event).GetOffset()
 }
 
-func (q *QueuedJobThrottle) Commit(event Event) {
+func (q *QueuedThrottle) Commit(event Event) {
 
 	elem := q.queue.Front()
 	front := elem.Value.(Event)
@@ -45,7 +44,7 @@ func (q *QueuedJobThrottle) Commit(event Event) {
 	q.runningOffset = 0
 }
 
-func (q *QueuedJobThrottle) Rollback(offset int64) {
+func (q *QueuedThrottle) Rollback(offset int64) {
 	if q.runningOffset == offset {
 		q.runningOffset = 0
 	} else {
@@ -53,7 +52,7 @@ func (q *QueuedJobThrottle) Rollback(offset int64) {
 	}
 }
 
-func (q *QueuedJobThrottle) PickOut() []Event {
+func (q *QueuedThrottle) PickOut() []Event {
 	if q.runningOffset == 0 {
 		frontElem := q.queue.Front()
 		if frontElem != nil {
@@ -67,9 +66,9 @@ func (q *QueuedJobThrottle) PickOut() []Event {
 	return nil
 }
 
-func NewQueuedThrottle(queue EventQueue) *QueuedJobThrottle {
+func NewQueuedThrottle(queue EventQueue) *QueuedThrottle {
 	last := queue.Back().Value.(Event)
-	q := &QueuedJobThrottle{
+	q := &QueuedThrottle{
 		lastOffset:    last.GetOffset(),
 		runningOffset: 0,
 		queue:         queue,

@@ -84,9 +84,9 @@ func (tes *taskErrorSanitation) AddError(taskName string, err error) {
 }
 
 type Executor struct {
-	name        string
-	store       database.RuntimeStore
-	notifyAgent *NotificationAgent
+	name     string
+	store    database.RuntimeStore
+	notifier *Notifier
 }
 
 func (exc *Executor) dealTaskRunning(ctx context.Context, f *Flow, t *Task) error {
@@ -268,7 +268,7 @@ func (exc *Executor) dealSuccess(ctx context.Context, f *Flow) {
 	if f.scheme.OnSuccess != nil {
 		f.scheme.OnSuccess(flowContext)
 	}
-	exc.notifyAgent.TriggerFlowComplete(ctx.Value(contextMetaKey))
+	exc.notifier.TriggerFlowComplete(ctx.Value(contextMetaKey))
 	exc.doCompleteStat(ctx, f)
 }
 
@@ -277,7 +277,7 @@ func (exc *Executor) dealFailure(ctx context.Context, f *Flow) {
 	if f.scheme.OnFailure != nil {
 		f.scheme.OnFailure(flowContext)
 	}
-	exc.notifyAgent.TriggerFlowComplete(ctx.Value(contextMetaKey))
+	exc.notifier.TriggerFlowComplete(ctx.Value(contextMetaKey))
 	exc.doCompleteStat(ctx, f)
 }
 
@@ -295,14 +295,14 @@ func (exc *Executor) spawn(ctx context.Context, f *Flow) {
 		case StatusPending:
 			if err := exc.dealPending(ctx, f); err != nil {
 				log.Printf("flow(%s-%s) dealPending error:%v\n", f.scheme.Name, f.uuid, err)
-				exc.notifyAgent.TriggerFlowRetry(ctx.Value(contextMetaKey))
+				exc.notifier.TriggerFlowRetry(ctx.Value(contextMetaKey))
 				return
 			}
 		case StatusRunning:
 			err := exc.dealRunning(ctx, f)
 			if err != nil {
 				log.Printf("flow(%s-%s) dealRunning error: %v\n", f.scheme.Name, f.uuid, err)
-				exc.notifyAgent.TriggerFlowRetry(ctx.Value(contextMetaKey))
+				exc.notifier.TriggerFlowRetry(ctx.Value(contextMetaKey))
 				return
 			}
 		case StatusSuccess:
@@ -317,7 +317,7 @@ func (exc *Executor) spawn(ctx context.Context, f *Flow) {
 	}
 }
 
-func (exc *Executor) run(ctx context.Context, meta *JobMeta) {
+func (exc *Executor) do(ctx context.Context, meta *FlowMeta) {
 	ctx = context.WithValue(ctx, contextMetaKey, meta)
 
 	log.Printf("run flow: %s\n", meta.uuid)
@@ -343,14 +343,14 @@ func (exc *Executor) run(ctx context.Context, meta *JobMeta) {
 	exc.spawn(ctx, f)
 }
 
-func (exc *Executor) Run(ctx context.Context, metaCh <-chan *JobMeta) {
+func (exc *Executor) Run(ctx context.Context, metaCh <-chan *FlowMeta) {
 	ctx = context.WithValue(ctx, contextAgentNameKey, exc.name)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case meta := <-metaCh:
-			go exc.run(ctx, meta)
+			go exc.do(ctx, meta)
 		}
 	}
 }
@@ -359,10 +359,10 @@ func (exc *Executor) Terminate() {
 	panic("not implement!")
 }
 
-func NewExecutor(name string, notifyAgent *NotificationAgent, store RuntimeStore) *Executor {
+func NewExecutor(name string, notifyAgent *Notifier, store RuntimeStore) *Executor {
 	return &Executor{
-		name:        name,
-		store:       store,
-		notifyAgent: notifyAgent,
+		name:     name,
+		store:    store,
+		notifier: notifyAgent,
 	}
 }

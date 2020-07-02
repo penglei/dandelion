@@ -7,14 +7,14 @@ internal data type converting path
 [source]
 ----
 
- +---------+                       +----------------------+
- | JobMeta |------ save to db ---->|database.JobMetaObject|
- +---------+                       +----------------------+
+ +---------+                        +-----------------------+
+ | FlowMeta|------ save to db ----> |database.FlowMetaObject|
+ +---------+                        +-----------------------+
     |   ^                                       |      |
     |   |                                       |      |
     |   |                                       |      |
     |   +----------- load from db --------------+      |
-    |                                                  |convert to create pending flow
+    |                                                  |convert to pending flow
     |                                                  |
     |                                                  |
     |       +-----------------------------+            |
@@ -39,17 +39,17 @@ internal data type converting path
                 |
                 |
                 |
-                |                +------+
+                |    execute     +------+
                 +------------->  | Task |
                                  +------+
 ----
 
 == TODO
 
-* query job flow status in runtime
+* query flow status in runtime
 * use log: github.com/uber-go/zap **
 * task orchestration can visit flow scheme
-* save job id (offset) in flow
+* save id (offset) in flow
 * FlowShapingManager can be protected by RCU
 * hide internal definition
 * implement DAG task orchestration

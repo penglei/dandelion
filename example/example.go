@@ -6,6 +6,9 @@ import (
 	"fmt"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/penglei/dandelion"
+	"log"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 )
 
@@ -64,11 +67,15 @@ func main() {
 			MeshTitle: "test mesh installing",
 		}
 		flowRuntime := dandelion.NewDefaultRuntime("", db)
-		err = flowRuntime.CreateJob(ctx, user, FlowClassInstall, meshStorage)
+		err = flowRuntime.Submit(ctx, user, FlowClassInstall, meshStorage)
 		if err != nil {
 			panic(err)
 		}
 	case RoleConsumer:
+		go func() {
+			log.Println(http.ListenAndServe("localhost:6060", nil))
+		}()
+
 		var agentName string
 		if len(os.Args) >= 3 {
 			agentName = os.Args[2]
@@ -88,12 +95,12 @@ func main() {
 }
 
 func init() {
-	jobTaskEntry := &meshInstallJob{
+	job := &meshInstallJob{
 		Data: customData{
 			Foo: "some_config_here",
 			Bar: 123,
 		},
 		K8sSvc: NewFakeK8sService(),
 	}
-	RegisterJobFlow(jobTaskEntry)
+	registerMeshInstallJob(job)
 }

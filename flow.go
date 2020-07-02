@@ -6,6 +6,22 @@ import (
 	"github.com/penglei/dandelion/util"
 )
 
+type FlowMeta struct {
+	id     int64 //must be total order
+	uuid   string
+	UserID string
+	class  FlowClass
+	data   []byte
+}
+
+func (jm *FlowMeta) GetOffset() int64 {
+	return jm.id
+}
+
+func (jm *FlowMeta) GetUUID() string {
+	return jm.uuid
+}
+
 type Flow struct {
 	FlowRuntimeState
 	flowId        int64

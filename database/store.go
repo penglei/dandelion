@@ -2,8 +2,8 @@ package database
 
 import (
 	"context"
-	"github.com/penglei/dandelion/util"
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/penglei/dandelion/util"
 )
 
 type TypeStatusRaw = int
@@ -23,7 +23,7 @@ type FlowDataObject struct {
 	RunningCnt int
 }
 
-type JobMetaObject struct {
+type FlowMetaObject struct {
 	ID     int64
 	UUID   string
 	UserID string
@@ -42,9 +42,9 @@ type TaskDataObject struct {
 }
 
 type RuntimeStore interface {
-	LoadUncommittedJobEvents(context.Context) ([]*JobMetaObject, error)
-	CreateJobEvent(ctx context.Context, meta *JobMetaObject) error
-	DeleteJobEvent(ctx context.Context, uuid string) error
+	LoadUncommittedFlowMeta(context.Context) ([]*FlowMetaObject, error)
+	CreateFlowMeta(ctx context.Context, meta *FlowMetaObject) error
+	DeleteFlowMeta(ctx context.Context, uuid string) error
 	GetOrCreateFlow(context.Context, FlowDataPartial) (FlowDataObject, error)
 	CreatePendingFlow(context.Context, FlowDataPartial) error
 	UpdateFlow(ctx context.Context, obj FlowDataObject, agentName string, mask util.BitMask) error

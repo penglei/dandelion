@@ -1,10 +1,9 @@
 package main
 
 import (
-	"github.com/penglei/dandelion"
 	"github.com/pborman/uuid"
+	"github.com/penglei/dandelion"
 	"log"
-	"time"
 )
 
 const (
@@ -21,7 +20,7 @@ type InstallMeshStorage struct {
 	TkeName   string `json:"tkeName,omitempty"`
 }
 
-func RegisterJobFlow(job *meshInstallJob) {
+func registerMeshInstallJob(job *meshInstallJob) {
 	t1 := TaskScheme{
 		Name: "first",
 		Task: TaskFn(job.FirstTask),
@@ -34,7 +33,7 @@ func RegisterJobFlow(job *meshInstallJob) {
 	installMeshFlow := &dandelion.FlowScheme{
 		Name:       FlowClassInstall,
 		NewStorage: func() interface{} { return &InstallMeshStorage{} },
-		Tasks:      dandelion.NewChainedTasks([]TaskScheme{t1, t2}),
+		Steps:      dandelion.NewChainedTasks([]TaskScheme{t1, t2}),
 		OnFailure: func(ctx dandelion.Context) {
 			log.Printf("failure, storage:%v\n", ctx.Global())
 		},
@@ -81,7 +80,7 @@ func (mj *meshInstallJob) FirstTask(ctx Context) error {
 	mj.Data.Bar = 456
 	log.Printf("FirstTask set data: %v", mj.Data)
 	//panic("FirstTask panic!")
-	time.Sleep(time.Second * 2)
+	//time.Sleep(time.Second * 2)
 	return ctx.Save()
 }
 
