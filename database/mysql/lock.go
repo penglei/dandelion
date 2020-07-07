@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"github.com/pkg/errors"
-	"log"
+	"go.uber.org/zap"
 	"sync"
 	"time"
 )
@@ -29,6 +29,7 @@ func getConnId(conn *sql.Conn) (int, error) {
 //notice: Acquire/Release is not thread-safety
 type mysqlLockImpl struct {
 	agentName    string
+	lg           *zap.Logger
 	db           *sql.DB
 	conn         *sql.Conn
 	lockerConnId int
@@ -47,7 +48,6 @@ func (m *mysqlLockImpl) cacheLocker(ctx context.Context, key string) {
 func (m *mysqlLockImpl) registerLock(ctx context.Context, key string) error {
 	_, err := m.db.ExecContext(ctx, "INSERT lock_timer (`key`, `agent_name`, `last_seen`) VALUES(?, ?, NOW())", key, m.agentName)
 	if IsKeyDuplicationError(err) {
-		log.Printf("unreachable error:%v", err)
 		return err
 	}
 	m.cacheLocker(ctx, key)
@@ -121,7 +121,6 @@ func (m *mysqlLockImpl) checkSchemeLockWhetherIsOwned(ctx context.Context, key s
 
 func (m *mysqlLockImpl) doLockRequest(ctx context.Context, key string) (bool, error) {
 	var flag sql.NullInt32
-	log.Printf("connection(%d) get_lock(%s, 0)\n", m.lockerConnId, key)
 	err := m.conn.QueryRowContext(ctx, "SELECT GET_LOCK(?, 0) as flag", key).Scan(&flag)
 	if err != nil && !IsNoRowsError(err) {
 		return false, err
@@ -163,7 +162,7 @@ func (m *mysqlLockImpl) AcquireLock(ctx context.Context, key string) (bool, erro
 		if err != nil {
 			releaseErr := m.releaseSchemaLock(ctx, key)
 			if releaseErr != nil {
-				log.Printf("release lock(%s) failed: %v", key, releaseErr)
+				m.lg.Error("release lock failed", zap.String("key", key), zap.Error(releaseErr))
 			}
 		}
 	}()
@@ -176,7 +175,6 @@ func (m *mysqlLockImpl) AcquireLock(ctx context.Context, key string) (bool, erro
 	if lockTimer == nil {
 		//we are creating the lock, register it.
 		if err = m.registerLock(ctx, key); err != nil {
-			log.Printf("register lock(%s) error: %v", key, err)
 			return false, err
 		}
 		return true, nil
@@ -197,7 +195,7 @@ func (m *mysqlLockImpl) AcquireLock(ctx context.Context, key string) (bool, erro
 
 	lockTimerLater, err := m.getLockTimerRecord(ctx, key)
 	if err != nil {
-		log.Printf("get lock meta(%s) error: %v", key, err)
+		m.lg.Debug("get lock meta error", zap.String("key", key), zap.Error(err))
 		return false, err
 	}
 	//lock timer wouldn't be null
@@ -206,7 +204,7 @@ func (m *mysqlLockImpl) AcquireLock(ctx context.Context, key string) (bool, erro
 	if expired {
 		// another executor has gone, we can take over the queue
 		if err = m.takeoverLock(ctx, key); err != nil {
-			log.Printf("takeover lock(%s) error: %v", key, err)
+			m.lg.Debug("failed to takeover lock", zap.String("key", key), zap.Error(err))
 			return false, err
 		}
 		return true, nil
@@ -248,7 +246,7 @@ func (m *mysqlLockImpl) checkLockConnAndDoHeartbeat(ctx context.Context) error {
 			for _, key := range lockerKeys {
 				_, err := stmt.ExecContext(ctx, key)
 				if err != nil {
-					log.Printf("renew last_seen for:%s error: %v", key, err)
+					m.lg.Debug("renew lock last_seen", zap.String("key", key), zap.Error(err))
 					return err
 				}
 			}
@@ -280,16 +278,16 @@ func (m *mysqlLockImpl) Bootstrap(ctx context.Context, connErrCallback func(err 
 
 		if err != nil {
 			if err := m.conn.Close(); err != nil {
-				log.Printf("close lock agent connection error:%v\n", err)
+				m.lg.Error("close lock agent connection error", zap.Error(err))
 			}
-			log.Printf("locker checking exit accidentally! error:%v", err)
+			m.lg.Warn("locker checking exit accidentally", zap.Error(err))
 			connErrCallback(err)
 		}
 	}()
 	return nil
 }
 
-func BuildMySQLLockAgent(db *sql.DB, agentName string, hbInterval time.Duration) (*mysqlLockImpl, error) {
+func BuildMySQLLockAgent(db *sql.DB, lg *zap.Logger, agentName string, hbInterval time.Duration) (*mysqlLockImpl, error) {
 
 	//XXX how to rebuilt if lock connection closed ?
 
@@ -306,6 +304,7 @@ func BuildMySQLLockAgent(db *sql.DB, agentName string, hbInterval time.Duration)
 
 	return &mysqlLockImpl{
 		agentName:    agentName,
+		lg:           lg,
 		db:           db,
 		conn:         conn,
 		lockerConnId: lockerConnId,

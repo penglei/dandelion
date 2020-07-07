@@ -72,7 +72,7 @@ type FlowSchemeInvalid struct {
 }
 
 func (f FlowSchemeInvalid) Error() string {
-	return fmt.Sprintf("flow scheme(%s) isn't exist!", f.name)
+	return fmt.Sprintf("flow scheme(%s) isn't exist", f.name)
 }
 
 var _ error = FlowSchemeInvalid{}

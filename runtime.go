@@ -10,7 +10,7 @@ import (
 	"github.com/penglei/dandelion/database"
 	"github.com/penglei/dandelion/database/mysql"
 	"github.com/penglei/dandelion/ratelimit"
-	"log"
+	"go.uber.org/zap"
 	"sync"
 	"time"
 )
@@ -99,8 +99,89 @@ func NewShapingManager() *FlowShapingManager {
 	}
 }
 
+type RuntimeBuilder struct {
+	name      string
+	lg        *zap.Logger
+	db        *sql.DB
+	workerNum int
+}
+
+func NewRuntimeBuilder(opts ...Option) *RuntimeBuilder {
+	rb := &RuntimeBuilder{}
+	for _, opt := range opts {
+		opt.Apply(rb)
+	}
+	return rb
+}
+
+func (rb *RuntimeBuilder) Build() *Runtime {
+	laBuilder := func() (LockAgent, error) {
+		return mysql.BuildMySQLLockAgent(rb.db, rb.lg, rb.name, LockHeartbeat)
+	}
+	la, err := laBuilder()
+	if err != nil {
+		panic(err)
+	}
+	if rb.name == "" {
+		rb.name = "default"
+	}
+	store := mysql.BuildRuntimeStore(rb.db)
+
+	return &Runtime{
+		lg:               rb.lg,
+		name:             rb.name,
+		store:            store,
+		lockGranularity:  QueueLockGranularity,
+		checkInterval:    PollInterval,
+		errorCount:       0,
+		lockAgent:        la,
+		lockAgentBuilder: laBuilder,
+		lockAgentMutex:   sync.RWMutex{},
+		metaChan:         make(chan *FlowMeta),
+		eventChan:        make(chan Event),
+		shapingManager:   NewShapingManager(),
+		executors:        make([]*Executor, 0),
+		workerNum:        rb.workerNum,
+	}
+}
+
+type Option func(rb *RuntimeBuilder)
+
+func (o Option) Apply(rb *RuntimeBuilder) {
+	o(rb)
+}
+
+func WithName(name string) Option {
+	return func(rb *RuntimeBuilder) {
+		rb.name = name
+	}
+}
+
+func WithLogger(lg *zap.Logger) Option {
+	return func(rb *RuntimeBuilder) {
+		rb.lg = lg
+	}
+}
+
+func WithWorkerNum(n int) Option {
+	return func(rb *RuntimeBuilder) {
+		rb.workerNum = n
+	}
+}
+
+func WithDB(db *sql.DB) Option {
+	return func(rb *RuntimeBuilder) {
+		rb.db = db
+	}
+}
+
+type Event int
+
+const EventFlowComplete Event = 1
+
 type Runtime struct {
 	ctx              context.Context
+	lg               *zap.Logger
 	name             string //name(consumer or producer)
 	store            RuntimeStore
 	lockGranularity  string
@@ -109,48 +190,21 @@ type Runtime struct {
 	lockAgent        LockAgent
 	lockAgentBuilder func() (LockAgent, error)
 	lockAgentMutex   sync.RWMutex
-	eventCh          chan *FlowMeta
+	metaChan         chan *FlowMeta //spmc
 	shapingManager   *FlowShapingManager
+	eventChan        chan Event
 	executors        []*Executor
 	workerNum        int
 }
 
 func NewDefaultRuntime(name string, db *sql.DB) *Runtime {
-	if name == "" {
-		name = "default"
-	}
-	store := mysql.BuildRuntimeStore(db)
-	laBuilder := func() (LockAgent, error) {
-		return mysql.BuildMySQLLockAgent(db, name, LockHeartbeat)
-	}
-	runtime := NewRuntime(name, store, laBuilder)
-
-	return runtime
-}
-
-func NewRuntime(name string, store RuntimeStore, laBuilder func() (LockAgent, error)) *Runtime {
-	la, err := laBuilder()
-	if err != nil {
-		panic(err)
-	}
-	return &Runtime{
-		name:             name,
-		store:            store,
-		lockGranularity:  QueueLockGranularity,
-		checkInterval:    PollInterval,
-		errorCount:       0,
-		lockAgent:        la,
-		lockAgentBuilder: laBuilder,
-		lockAgentMutex:   sync.RWMutex{},
-		eventCh:          make(chan *FlowMeta),
-		shapingManager:   NewShapingManager(),
-		executors:        make([]*Executor, 0),
-		workerNum:        4,
-	}
-}
-
-func (rt *Runtime) SetWorkerNum(n int) {
-	rt.workerNum = n
+	builder := NewRuntimeBuilder(
+		WithName(name),
+		WithDB(db),
+		WithLogger(zap.L()),
+		WithWorkerNum(4),
+	)
+	return builder.Build()
 }
 
 //bootstrap event consumer and flow executor
@@ -164,10 +218,10 @@ func (rt *Runtime) Bootstrap(ctx context.Context) error {
 	go func() {
 		err := rt.iterate(ctx)
 		if err != nil {
-			log.Printf("flow dispatcher exit error: %v", err)
+			rt.lg.Error("flow dispatcher exit error", zap.Error(err))
 			return
 		}
-		log.Printf("flow dispatcher has exited!\n")
+		rt.lg.Info("flow dispatcher has exited")
 	}()
 
 	notifyAgent := &Notifier{}
@@ -175,10 +229,10 @@ func (rt *Runtime) Bootstrap(ctx context.Context) error {
 	notifyAgent.RegisterFlowRetry(rt.onFlowRetry)
 
 	for i := 0; i < rt.workerNum; i += 1 {
-		executor := NewExecutor(rt.name, notifyAgent, rt.store)
+		executor := NewExecutor(rt.name, notifyAgent, rt.store, rt.lg)
 		rt.executors = append(rt.executors, executor)
 		go func() {
-			executor.Run(ctx, rt.eventCh)
+			executor.Bootstrap(ctx, rt.metaChan)
 		}()
 	}
 
@@ -208,7 +262,7 @@ func (rt *Runtime) Submit(ctx context.Context, user string, class FlowClass, jso
 	//pre-creating pending flow that can be visible for querying as soon as possible
 	err = birthPendingFlow(ctx, rt.store, dbFlowMeta.UUID, dbFlowMeta.UserID, class, dbFlowMeta.Data)
 	if err != nil {
-		log.Printf("precreating pending flow error:%v", err)
+		rt.lg.Error("precreate pending flow error", zap.Error(err))
 	}
 
 	return nil
@@ -246,13 +300,17 @@ func (rt *Runtime) iterate(ctx context.Context) error {
 			metas, err := rt.fetchAllFlyingFlows(ctx)
 			if err != nil {
 				rt.errorCount += 1
-				log.Printf("pulling flowmeta error:%v, errorCount=%d\n", err, rt.errorCount)
+				rt.lg.Warn("pull flow meta error", zap.Error(err), zap.Int("errorCount", rt.errorCount))
 			} else {
 				rt.errorCount = 0
 				rt.dispatch(ctx, metas)
 			}
 		case <-ctx.Done():
 			return nil
+		case event := <-rt.eventChan:
+			if event == EventFlowComplete {
+				//TODO
+			}
 		}
 	}
 }
@@ -261,21 +319,21 @@ func (rt *Runtime) onLockAgentError(reason error) {
 	//TODO pause/stop all executors
 	fmt.Printf("!!! lock agent connection lost. error : %v\n", reason)
 
-	ticker := time.NewTicker(time.Second * 5)
-	defer ticker.Stop()
+	retryTicker := time.NewTicker(time.Second * 5)
+	defer retryTicker.Stop()
 	for {
 		select {
 		case <-rt.ctx.Done():
 			return
-		case <-ticker.C:
-			log.Printf("!!! rebuilding runtime LockAgent..")
+		case <-retryTicker.C:
+			rt.lg.Warn("!!! rebuilding runtime LockAgent..")
 			lockAgent, err := rt.lockAgentBuilder()
 			if err != nil {
-				log.Printf("!!! rebuilding lock agent error: %v\n", err)
+				rt.lg.Error("!!! rebuilding lock agent error", zap.Error(err))
 				continue
 			}
 			if err = lockAgent.Bootstrap(rt.ctx, rt.onLockAgentError); err != nil {
-				log.Printf("!!! lock agent bootstrap error: %v \n", err)
+				rt.lg.Error("!!! lock agent bootstrap error", zap.Error(err))
 				continue
 			}
 			rt.lockAgentMutex.Lock()
@@ -294,7 +352,7 @@ func (rt *Runtime) onFlowComplete(item interface{}) {
 
 	err := rt.store.DeleteFlowMeta(rt.ctx, meta.uuid)
 	if err != nil {
-		log.Printf("delete flow meta failed: %v\n", err)
+		rt.lg.Error("delete flow meta failed", zap.Error(err))
 	}
 	rt.forward()
 }
@@ -308,16 +366,20 @@ func (rt *Runtime) onFlowRetry(item interface{}) {
 func (rt *Runtime) dispatch(ctx context.Context, metas []*FlowMeta) {
 	eventsMapQueue := make(map[string]EventQueue)
 
-	for _, event := range metas {
+	for _, meta := range metas {
+		if _, err := Resolve(meta.class); err != nil {
+			rt.lg.Warn("unrecognized flow", zap.Error(err), zap.String("id", meta.uuid))
+			continue
+		}
 
-		queueName := rt.getQueueName(event)
+		queueName := rt.getQueueName(meta)
 
 		userClassQueue, ok := eventsMapQueue[queueName]
 		if !ok {
 			userClassQueue = list.New()
 			eventsMapQueue[queueName] = userClassQueue
 		}
-		userClassQueue.PushBack(event)
+		userClassQueue.PushBack(meta)
 	}
 
 	ownedMapQueue := make(map[string]EventQueue)
@@ -326,11 +388,11 @@ func (rt *Runtime) dispatch(ctx context.Context, metas []*FlowMeta) {
 	for queueName, queue := range eventsMapQueue {
 		locked, err := rt.lockAgent.AcquireLock(ctx, queueName)
 		if err != nil {
-			log.Printf("acquire lock(%s) error:%v\n", queueName, err)
+			rt.lg.Error("acquire flow lock fail", zap.String("key", queueName), zap.Error(err))
 			continue
 		}
 		if !locked {
-			log.Printf("can't get the lock: %s\n", queueName)
+			rt.lg.Info("can't get the flow lock", zap.String("key", queueName))
 			continue
 		}
 		ownedMapQueue[queueName] = queue
@@ -353,7 +415,7 @@ func (rt *Runtime) forward() {
 
 	for _, meta := range metas {
 		select {
-		case rt.eventCh <- meta:
+		case rt.metaChan <- meta:
 		case <-ctx.Done():
 			return
 		}

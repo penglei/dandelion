@@ -6,7 +6,7 @@ import (
 	"github.com/penglei/dandelion/database"
 	"github.com/penglei/dandelion/util"
 	"go.uber.org/atomic"
-	"log"
+	"go.uber.org/zap"
 	"strings"
 	"sync"
 )
@@ -85,18 +85,19 @@ func (tes *taskErrorSanitation) AddError(taskName string, err error) {
 
 type Executor struct {
 	name     string
+	lg       *zap.Logger
 	store    database.RuntimeStore
 	notifier *Notifier
 }
 
-func (exc *Executor) dealTaskRunning(ctx context.Context, f *Flow, t *Task) error {
+func (e *Executor) dealTaskRunning(ctx context.Context, f *Flow, t *Task) error {
 	if !t.executed {
 		t.setHasBeenExecuted()
-		if err := t.persistTask(ctx, exc.store, f.flowId, util.TaskSetExecuted); err != nil {
+		if err := t.persistTask(ctx, e.store, f.flowId, util.TaskSetExecuted); err != nil {
 			return internalError{err}
 		}
 
-		flowContext := NewFlowContext(ctx, exc.store, f)
+		flowContext := NewFlowContext(ctx, e.store, f)
 		var taskError = func() (err error) {
 			defer func() {
 				if p := recover(); p != nil {
@@ -112,8 +113,11 @@ func (exc *Executor) dealTaskRunning(ctx context.Context, f *Flow, t *Task) erro
 			//{
 			t.setStatus(StatusFailure)
 			t.setError(taskError)
-			if err := t.persistTask(ctx, exc.store, f.flowId, util.TaskSetError|util.TaskSetFinishStat); err != nil {
-				log.Printf("task(%s, %s) execution failed:%v, and status save failed \n", taskError, f.uuid, t.name)
+			if err := t.persistTask(ctx, e.store, f.flowId, util.TaskSetError|util.TaskSetFinishStat); err != nil {
+				e.lg.Debug("task execution failed, and status save failed",
+					zap.Error(taskError),
+					zap.String("id", f.uuid),
+					zap.String("task_name", t.name))
 			}
 			//}
 
@@ -121,9 +125,11 @@ func (exc *Executor) dealTaskRunning(ctx context.Context, f *Flow, t *Task) erro
 		} else {
 			//{
 			t.setStatus(StatusSuccess)
-			err := t.persistTask(ctx, exc.store, f.flowId, util.TaskUpdateDefault|util.TaskSetFinishStat)
+			err := t.persistTask(ctx, e.store, f.flowId, util.TaskUpdateDefault|util.TaskSetFinishStat)
 			if err != nil {
-				log.Printf("task(%s, %s) execution successful, but status save failed \n", f.uuid, t.name)
+				e.lg.Error("task execution successful, but status save failed",
+					zap.String("id", f.uuid),
+					zap.String("task_name", t.name))
 				return nil
 			}
 			//}
@@ -135,26 +141,28 @@ func (exc *Executor) dealTaskRunning(ctx context.Context, f *Flow, t *Task) erro
 		err := fmt.Errorf("task(%s, %s) failed unexpectedly, maybe task original status has saved failed", f.uuid, t.name)
 		t.setStatus(StatusFailure)
 		t.setError(err)
-		if err := t.persistTask(ctx, exc.store, f.flowId, util.TaskSetError|util.TaskSetFinishStat); err != nil {
-			log.Printf("task(%s, %s) failure status save failed \n", f.uuid, t.name)
+		if err := t.persistTask(ctx, e.store, f.flowId, util.TaskSetError|util.TaskSetFinishStat); err != nil {
+			e.lg.Error("task failure status didn't save",
+				zap.String("id", f.uuid),
+				zap.String("task_name", t.name))
 		}
 		//}
 		return err
 	}
 }
 
-func (exc *Executor) runTask(ctx context.Context, f *Flow, t *Task) error {
+func (e *Executor) runTask(ctx context.Context, f *Flow, t *Task) error {
 
 	for {
 		switch t.status {
 		case StatusPending:
 			t.setStatus(StatusRunning)
-			err := t.persistTask(ctx, exc.store, f.flowId, util.TaskUpdateDefault)
+			err := t.persistTask(ctx, e.store, f.flowId, util.TaskUpdateDefault)
 			if err != nil {
 				return internalError{err}
 			}
 		case StatusRunning:
-			err := exc.dealTaskRunning(ctx, f, t)
+			err := e.dealTaskRunning(ctx, f, t)
 			if err != nil {
 				return err
 			}
@@ -166,19 +174,19 @@ func (exc *Executor) runTask(ctx context.Context, f *Flow, t *Task) error {
 	}
 }
 
-func (exc *Executor) dealPending(ctx context.Context, f *Flow) error {
+func (e *Executor) dealPending(ctx context.Context, f *Flow) error {
 	f.orchestration.Prepare(f.state)
 
 	f.setStatus(StatusRunning)
 	//our fsm principle: next STATUS(here is Running) must be saved in persistent storage
 	//before the function for the next STATUS runs
-	err := f.persistFlow(ctx, exc.store, util.FlowUpdateDefault)
+	err := f.persistFlow(ctx, e.store, util.FlowUpdateDefault)
 	return err
 }
 
-func (exc *Executor) restoreTasks(ctx context.Context, f *Flow, tasks []*Task) error {
+func (e *Executor) restoreTasks(ctx context.Context, f *Flow, tasks []*Task) error {
 
-	taskDataPtrs, err := exc.store.LoadFlowTasks(ctx, f.flowId)
+	taskDataPtrs, err := e.store.LoadFlowTasks(ctx, f.flowId)
 	if err != nil {
 		return err
 	}
@@ -196,8 +204,8 @@ func (exc *Executor) restoreTasks(ctx context.Context, f *Flow, tasks []*Task) e
 	return nil
 }
 
-func (exc *Executor) dealRunning(ctx context.Context, f *Flow) error {
-	dbErr := f.persistStartRunningStat(ctx, exc.store)
+func (e *Executor) dealRunning(ctx context.Context, f *Flow) error {
+	dbErr := f.persistStartRunningStat(ctx, e.store)
 	if dbErr != nil {
 		return dbErr
 	}
@@ -217,7 +225,7 @@ func (exc *Executor) dealRunning(ctx context.Context, f *Flow) error {
 		//taskRun can update these tasks by pointer
 		f.updateSpawnedTasks(partialTasks)
 
-		if err := exc.restoreTasks(ctx, f, partialTasks); err != nil {
+		if err := e.restoreTasks(ctx, f, partialTasks); err != nil {
 			return err
 		}
 
@@ -228,7 +236,7 @@ func (exc *Executor) dealRunning(ctx context.Context, f *Flow) error {
 		for _, task := range partialTasks {
 			go func(t *Task) {
 				defer wg.Done()
-				taskRunErr := exc.runTask(ctx, f, t)
+				taskRunErr := e.runTask(ctx, f, t)
 				if taskRunErr != nil {
 					tes.AddError(f.uuid+":"+t.name, taskRunErr)
 				}
@@ -247,69 +255,79 @@ func (exc *Executor) dealRunning(ctx context.Context, f *Flow) error {
 			return tes.GetErrors()
 		}
 
-		log.Printf("run flow got error:%v\n", tes.GetErrors())
+		e.lg.Debug("run flow got error", zap.Error(tes.GetErrors()))
 		f.setStatus(StatusFailure)
-		err := f.persistFlow(ctx, exc.store, util.FlowUpdateDefault)
+		err := f.persistFlow(ctx, e.store, util.FlowUpdateDefault)
 		if err != nil {
-			log.Printf("update flow to status(%v) failed:%v\n", StatusFailure, err)
+			e.lg.Debug("update flow to status failed", zap.Int("status", int(StatusFailure)), zap.Error(err))
 		}
 	} else {
 		f.setStatus(StatusSuccess)
-		err := f.persistFlow(ctx, exc.store, util.FlowUpdateDefault)
+		err := f.persistFlow(ctx, e.store, util.FlowUpdateDefault)
 		if err != nil {
-			log.Printf("update flow to status(%v) error:%v\n", StatusSuccess, err)
+			e.lg.Debug("failed to update flow status", zap.Int("status", int(StatusSuccess)), zap.Error(err))
 		}
 	}
 	return nil
 }
 
-func (exc *Executor) dealSuccess(ctx context.Context, f *Flow) {
-	flowContext := NewFlowContext(ctx, exc.store, f)
+func (e *Executor) dealSuccess(ctx context.Context, f *Flow) {
+	flowContext := NewFlowContext(ctx, e.store, f)
 	if f.scheme.OnSuccess != nil {
 		f.scheme.OnSuccess(flowContext)
 	}
-	exc.notifier.TriggerFlowComplete(ctx.Value(contextMetaKey))
-	exc.doCompleteStat(ctx, f)
+	e.notifier.TriggerFlowComplete(ctx.Value(contextMetaKey))
+	e.doCompleteStat(ctx, f)
 }
 
-func (exc *Executor) dealFailure(ctx context.Context, f *Flow) {
-	flowContext := NewFlowContext(ctx, exc.store, f)
+func (e *Executor) dealFailure(ctx context.Context, f *Flow) {
+	flowContext := NewFlowContext(ctx, e.store, f)
 	if f.scheme.OnFailure != nil {
 		f.scheme.OnFailure(flowContext)
 	}
-	exc.notifier.TriggerFlowComplete(ctx.Value(contextMetaKey))
-	exc.doCompleteStat(ctx, f)
+	e.notifier.TriggerFlowComplete(ctx.Value(contextMetaKey))
+	e.doCompleteStat(ctx, f)
 }
 
-func (exc *Executor) doCompleteStat(ctx context.Context, f *Flow) {
-	log.Printf("flow(%s-%s) complete: %s ", f.scheme.Name, f.uuid, f.status.String())
-	err := f.persistEndRunningStat(ctx, exc.store)
+func (e *Executor) doCompleteStat(ctx context.Context, f *Flow) {
+	e.lg.Debug("flow execute completely",
+		zap.Any("flow name", f.scheme.Name),
+		zap.String("id", f.uuid),
+		zap.String("status", f.status.String()))
+
+	err := f.persistEndRunningStat(ctx, e.store)
 	if err != nil {
-		log.Printf("save ending stat error:%v\n", err)
+		e.lg.Error("save last stat error", zap.Error(err))
 	}
 }
 
-func (exc *Executor) spawn(ctx context.Context, f *Flow) {
+func (e *Executor) spawn(ctx context.Context, f *Flow) {
 	for {
 		switch f.status {
 		case StatusPending:
-			if err := exc.dealPending(ctx, f); err != nil {
-				log.Printf("flow(%s-%s) dealPending error:%v\n", f.scheme.Name, f.uuid, err)
-				exc.notifier.TriggerFlowRetry(ctx.Value(contextMetaKey))
+			if err := e.dealPending(ctx, f); err != nil {
+				e.lg.Error("flow dealPending error",
+					zap.Any("flow name", f.scheme.Name),
+					zap.String("id", f.uuid),
+					zap.Error(err))
+				e.notifier.TriggerFlowRetry(ctx.Value(contextMetaKey))
 				return
 			}
 		case StatusRunning:
-			err := exc.dealRunning(ctx, f)
+			err := e.dealRunning(ctx, f)
 			if err != nil {
-				log.Printf("flow(%s-%s) dealRunning error: %v\n", f.scheme.Name, f.uuid, err)
-				exc.notifier.TriggerFlowRetry(ctx.Value(contextMetaKey))
+				e.lg.Error("flow dealRunning error",
+					zap.Any("flow name", f.scheme.Name),
+					zap.String("id", f.uuid),
+					zap.Error(err))
+				e.notifier.TriggerFlowRetry(ctx.Value(contextMetaKey))
 				return
 			}
 		case StatusSuccess:
-			exc.dealSuccess(ctx, f)
+			e.dealSuccess(ctx, f)
 			return
 		case StatusFailure:
-			exc.dealFailure(ctx, f)
+			e.dealFailure(ctx, f)
 			return
 		default:
 			panic("unknown flow status")
@@ -317,51 +335,52 @@ func (exc *Executor) spawn(ctx context.Context, f *Flow) {
 	}
 }
 
-func (exc *Executor) do(ctx context.Context, meta *FlowMeta) {
+func (e *Executor) do(ctx context.Context, meta *FlowMeta) {
 	ctx = context.WithValue(ctx, contextMetaKey, meta)
 
-	log.Printf("run flow: %s\n", meta.uuid)
+	e.lg.Debug("run flow", zap.String("id", meta.uuid))
 
 	data, err := newPendingFlowData(meta.uuid, meta.UserID, meta.class, meta.data)
 	if err != nil {
-		log.Printf("new pending flowing error:%v\n", err)
+		e.lg.Warn("new pending flow error", zap.String("id", meta.uuid), zap.Error(err))
 		return
 	}
 
-	obj, err := exc.store.GetOrCreateFlow(ctx, *data)
+	obj, err := e.store.GetOrCreateFlow(ctx, *data)
 	if err != nil {
-		log.Printf("get or create flow error:%v", err)
+		e.lg.Warn("get or create flow error", zap.String("id", meta.uuid), zap.Error(err))
 		return
 	}
 
 	f, err := newFlow(obj)
 	if err != nil {
-		log.Printf("create flow error:%v\n", err)
+		e.lg.Warn("create flow error", zap.String("id", meta.uuid), zap.Error(err))
 		return
 	}
 
-	exc.spawn(ctx, f)
+	e.spawn(ctx, f)
 }
 
-func (exc *Executor) Run(ctx context.Context, metaCh <-chan *FlowMeta) {
-	ctx = context.WithValue(ctx, contextAgentNameKey, exc.name)
+func (e *Executor) Bootstrap(ctx context.Context, metaCh <-chan *FlowMeta) {
+	ctx = context.WithValue(ctx, contextAgentNameKey, e.name)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case meta := <-metaCh:
-			go exc.do(ctx, meta)
+			go e.do(ctx, meta)
 		}
 	}
 }
 
-func (exc *Executor) Terminate() {
+func (e *Executor) Terminate() {
 	panic("not implement!")
 }
 
-func NewExecutor(name string, notifyAgent *Notifier, store RuntimeStore) *Executor {
+func NewExecutor(name string, notifyAgent *Notifier, store RuntimeStore, lg *zap.Logger) *Executor {
 	return &Executor{
 		name:     name,
+		lg:       lg,
 		store:    store,
 		notifier: notifyAgent,
 	}

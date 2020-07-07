@@ -6,6 +6,7 @@ import (
 	"fmt"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/penglei/dandelion"
+	"go.uber.org/zap"
 	"log"
 	"net/http"
 	_ "net/http/pprof"
@@ -52,6 +53,10 @@ func main() {
 			role = RoleConsumer
 		}
 	}
+	conf := zap.NewDevelopmentConfig()
+	conf.Level = zap.NewAtomicLevelAt(zap.DebugLevel)
+	l, err := conf.Build()
+	zap.ReplaceGlobals(l)
 
 	ctx := context.Background()
 	//ctx, cancelFn := context.WithCancel(ctx)
