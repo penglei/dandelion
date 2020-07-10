@@ -184,6 +184,10 @@ func (e *Executor) dealPending(ctx context.Context, f *Flow) error {
 	return err
 }
 
+func (e Executor) dealBlocking(ctx context.Context, f *Flow) error {
+	return nil
+}
+
 func (e *Executor) restoreTasks(ctx context.Context, f *Flow, tasks []*Task) error {
 
 	taskDataPtrs, err := e.store.LoadFlowTasks(ctx, f.flowId)
@@ -313,7 +317,7 @@ func (e *Executor) spawn(ctx context.Context, f *Flow) {
 				e.notifier.TriggerFlowRetry(ctx.Value(contextMetaKey))
 				return
 			}
-		case StatusRunning:
+		case StatusRunning: //resume the flow terminated accidently in the past...
 			err := e.dealRunning(ctx, f)
 			if err != nil {
 				e.lg.Error("flow dealRunning error",
@@ -329,6 +333,10 @@ func (e *Executor) spawn(ctx context.Context, f *Flow) {
 		case StatusFailure:
 			e.dealFailure(ctx, f)
 			return
+		// case Block
+		// 1. find current blocked tasks
+		// 2. call each task predicate method to check whether it run again
+		// 3. if one task predicate is satisfy, call it
 		default:
 			panic("unknown flow status")
 		}
@@ -361,13 +369,13 @@ func (e *Executor) do(ctx context.Context, meta *FlowMeta) {
 	e.spawn(ctx, f)
 }
 
-func (e *Executor) Bootstrap(ctx context.Context, metaCh <-chan *FlowMeta) {
+func (e *Executor) Bootstrap(ctx context.Context, metaChan <-chan *FlowMeta) {
 	ctx = context.WithValue(ctx, contextAgentNameKey, e.name)
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case meta := <-metaCh:
+		case meta := <-metaChan:
 			go e.do(ctx, meta)
 		}
 	}

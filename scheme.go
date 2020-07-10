@@ -40,12 +40,17 @@ type TaskOrchestration interface {
 
 type TaskHandle interface {
 	Execute(ctx Context) error
+	Predicate() bool
 }
 
 type TaskFn func(ctx Context) error
 
 func (t TaskFn) Execute(ctx Context) error {
 	return t(ctx)
+}
+
+func (t TaskFn) Predicate() bool {
+	return true
 }
 
 type TaskScheme struct {

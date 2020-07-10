@@ -71,6 +71,11 @@ func (c *ChainedFlowTasks) Next() []*Task {
 	}
 	tasks := c.tasks[nextIdx : nextIdx+1]
 	c.nextIndex = nextIdx + 1
+
+
+	//TODO
+	//1. if task status is Blocked
+	//	--> call task Resume method.
 	return tasks
 }
 
