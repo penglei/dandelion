@@ -6,7 +6,7 @@ import (
 	"github.com/penglei/dandelion/util"
 )
 
-type Task struct {
+type RtTask struct {
 	name     string
 	status   Status
 	scheme   *TaskScheme
@@ -14,37 +14,37 @@ type Task struct {
 	executed bool
 }
 
-func (t *Task) setScheme(scheme *TaskScheme) {
+func (t *RtTask) setScheme(scheme *TaskScheme) {
 	t.scheme = scheme
 }
 
-func (t *Task) setError(err error) {
+func (t *RtTask) setError(err error) {
 	t.err = err
 }
 
-func (t *Task) setStatus(status Status) {
+func (t *RtTask) setStatus(status Status) {
 	t.status = status
 }
 
-func (t *Task) setHasBeenExecuted() {
+func (t *RtTask) setHasBeenExecuted() {
 	t.executed = true
 }
 
-func (t *Task) persistTask(ctx context.Context, store RuntimeStore, flowId int64, mask util.BitMask) error {
+func (t *RtTask) persistTask(ctx context.Context, store RuntimeStore, processId int64, mask util.BitMask) error {
 	taskData := database.TaskDataObject{
-		FlowID: flowId,
-		Name:   t.name,
-		Status: t.status.Raw(),
+		ProcessID: processId,
+		Name:      t.name,
+		Status:    t.status.Raw(),
 	}
 	if mask.Has(util.TaskSetError) {
 		taskData.ErrorMsg = t.err.Error()
 	}
 
-	return store.UpsertFlowTask(ctx, taskData, mask)
+	return store.UpsertTask(ctx, taskData, mask)
 }
 
-func newTask(name string, status Status) *Task {
-	return &Task{
+func newTask(name string, status Status) *RtTask {
+	return &RtTask{
 		status: status,
 		name:   name,
 		scheme: nil,

@@ -23,13 +23,13 @@ const (
 	LockHeartbeat        = time.Second * 3
 )
 
-type FlowShapingManager struct {
+type ShapingManager struct {
 	mutex sync.Mutex
-	sinks map[string]ratelimit.FlowShaping
+	sinks map[string]ratelimit.Shaping
 }
 
 //concentrator
-func (m *FlowShapingManager) AddQueues(queues map[string]EventQueue) {
+func (m *ShapingManager) AddQueues(queues map[string]EventQueue) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
@@ -44,19 +44,19 @@ func (m *FlowShapingManager) AddQueues(queues map[string]EventQueue) {
 	}
 }
 
-func (m *FlowShapingManager) DropAllQueues() {
+func (m *ShapingManager) DropAllQueues() {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
-	m.sinks = make(map[string]ratelimit.FlowShaping)
+	m.sinks = make(map[string]ratelimit.Shaping)
 }
 
-func (m *FlowShapingManager) Remove(key string) {
+func (m *ShapingManager) Remove(key string) {
 	m.mutex.Lock()
 	delete(m.sinks, key)
 	m.mutex.Unlock()
 }
 
-func (m *FlowShapingManager) PickOutAll() []*FlowMeta {
+func (m *ShapingManager) PickOutAll() []*ProcessMeta {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
@@ -65,14 +65,14 @@ func (m *FlowShapingManager) PickOutAll() []*FlowMeta {
 		events = append(events, q.PickOut()...)
 	}
 
-	metas := make([]*FlowMeta, 0, len(events))
+	metas := make([]*ProcessMeta, 0, len(events))
 	for _, e := range events {
-		metas = append(metas, e.(*FlowMeta))
+		metas = append(metas, e.(*ProcessMeta))
 	}
 	return metas
 }
 
-func (m *FlowShapingManager) Commit(key string, meta *FlowMeta) {
+func (m *ShapingManager) Commit(key string, meta *ProcessMeta) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
@@ -82,7 +82,7 @@ func (m *FlowShapingManager) Commit(key string, meta *FlowMeta) {
 	}
 }
 
-func (m *FlowShapingManager) Rollback(key string, meta *FlowMeta) {
+func (m *ShapingManager) Rollback(key string, meta *ProcessMeta) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
@@ -92,10 +92,10 @@ func (m *FlowShapingManager) Rollback(key string, meta *FlowMeta) {
 	}
 }
 
-func NewShapingManager() *FlowShapingManager {
-	return &FlowShapingManager{
+func NewShapingManager() *ShapingManager {
+	return &ShapingManager{
 		mutex: sync.Mutex{},
-		sinks: make(map[string]ratelimit.FlowShaping),
+		sinks: make(map[string]ratelimit.Shaping),
 	}
 }
 
@@ -137,7 +137,7 @@ func (rb *RuntimeBuilder) Build() *Runtime {
 		lockAgent:        la,
 		lockAgentBuilder: laBuilder,
 		lockAgentMutex:   sync.RWMutex{},
-		metaChan:         make(chan *FlowMeta),
+		metaChan:         make(chan *ProcessMeta),
 		eventChan:        make(chan Event),
 		shapingManager:   NewShapingManager(),
 		executors:        make([]*Executor, 0),
@@ -177,7 +177,7 @@ func WithDB(db *sql.DB) Option {
 
 type Event int
 
-const EventFlowComplete Event = 1
+const EventComplete Event = 1
 
 type Runtime struct {
 	ctx              context.Context
@@ -190,8 +190,8 @@ type Runtime struct {
 	lockAgent        LockAgent
 	lockAgentBuilder func() (LockAgent, error)
 	lockAgentMutex   sync.RWMutex
-	metaChan         chan *FlowMeta //spmc
-	shapingManager   *FlowShapingManager
+	metaChan         chan *ProcessMeta //spmc
+	shapingManager   *ShapingManager
 	eventChan        chan Event
 	executors        []*Executor
 	workerNum        int
@@ -207,7 +207,7 @@ func NewDefaultRuntime(name string, db *sql.DB) *Runtime {
 	return builder.Build()
 }
 
-//bootstrap event consumer and flow executor
+//bootstrap event consumer and process executor
 func (rt *Runtime) Bootstrap(ctx context.Context) error {
 	rt.ctx = ctx
 	err := rt.lockAgent.Bootstrap(rt.ctx, rt.onLockAgentError)
@@ -218,15 +218,15 @@ func (rt *Runtime) Bootstrap(ctx context.Context) error {
 	go func() {
 		err := rt.iterate(ctx)
 		if err != nil {
-			rt.lg.Error("flow dispatcher exit error", zap.Error(err))
+			rt.lg.Error("process dispatcher exit error", zap.Error(err))
 			return
 		}
-		rt.lg.Info("flow dispatcher has exited")
+		rt.lg.Info("process dispatcher has exited")
 	}()
 
 	notifyAgent := &Notifier{}
-	notifyAgent.RegisterFlowComplete(rt.onFlowComplete)
-	notifyAgent.RegisterFlowRetry(rt.onFlowRetry)
+	notifyAgent.RegisterProcessComplete(rt.onProcessComplete)
+	notifyAgent.RegisterProcessRetry(rt.onProcessRetry)
 
 	for i := 0; i < rt.workerNum; i += 1 {
 		executor := NewExecutor(rt.name, notifyAgent, rt.store, rt.lg)
@@ -239,53 +239,76 @@ func (rt *Runtime) Bootstrap(ctx context.Context) error {
 	return nil
 }
 
-func (rt *Runtime) Submit(ctx context.Context, user string, class FlowClass, jsonSerializableData interface{}) error {
+func (rt *Runtime) Submit(
+	ctx context.Context,
+	user string,
+	class ProcessClass,
+	jsonSerializableData interface{},
+) (string, error) {
 	//TODO check jsonSerializableData is Storage Type
 
 	data, err := json.Marshal(jsonSerializableData)
 	if err != nil {
-		return err
+		return "", err
 	}
-	dbFlowMeta := database.FlowMetaObject{
-		UUID:   uuid.New(),
-		UserID: user,
-		Class:  class.Raw(),
-		Data:   data,
+	dbMeta := database.ProcessMetaObject{
+		UUID:  uuid.New(),
+		User:  user,
+		Class: class.Raw(),
+		Data:  data,
 	}
 
 	//save it
-	err = rt.store.CreateFlowMeta(ctx, &dbFlowMeta)
+	err = rt.store.CreateProcessMeta(ctx, &dbMeta)
 	if err != nil {
-		return err
+		return "", err
 	}
 
-	//pre-creating pending flow that can be visible for querying as soon as possible
-	err = birthPendingFlow(ctx, rt.store, dbFlowMeta.UUID, dbFlowMeta.UserID, class, dbFlowMeta.Data)
-	if err != nil {
-		rt.lg.Error("precreate pending flow error", zap.Error(err))
-	}
+	return dbMeta.UUID, nil
+}
 
+func (rt *Runtime) Resume(uuid string) error {
 	return nil
 }
 
-func (rt *Runtime) Find(ctx context.Context, user string, class FlowClass) {
-
+func (rt *Runtime) Stop(uuid string) error {
+	return nil
 }
 
-func (rt *Runtime) fetchAllFlyingFlows(ctx context.Context) ([]*FlowMeta, error) {
-	objects, err := rt.store.LoadUncommittedFlowMeta(ctx)
+/*
+func (rt *Runtime) GetProcess(ctx context.Context, uuid string) error {
+	processObj, err := rt.store.GetInstance(ctx, uuid)
+	if err != nil {
+		return err
+	}
+	if processObj == nil {
+		return nil // TODO
+	}
+
+	scheme, err := Resolve(ClassFromRaw(processObj.Class))
+	if err != nil {
+		return err
+	}
+	orch := scheme.NewOrchestration()
+
+	return nil
+}
+*/
+
+func (rt *Runtime) fetchAllFlyingProcesses(ctx context.Context) ([]*ProcessMeta, error) {
+	objects, err := rt.store.LoadUncommittedMeta(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	metas := make([]*FlowMeta, 0)
+	metas := make([]*ProcessMeta, 0)
 	for _, obj := range objects {
-		metas = append(metas, &FlowMeta{
-			id:     obj.ID,
-			uuid:   obj.UUID,
-			UserID: obj.UserID,
-			class:  FlowClassFromRaw(obj.Class),
-			data:   obj.Data,
+		metas = append(metas, &ProcessMeta{
+			id:    obj.ID,
+			uuid:  obj.UUID,
+			User:  obj.User,
+			class: ClassFromRaw(obj.Class),
+			data:  obj.Data,
 		})
 	}
 	return metas, nil
@@ -297,10 +320,10 @@ func (rt *Runtime) iterate(ctx context.Context) error {
 	for {
 		select {
 		case <-ticker.C:
-			metas, err := rt.fetchAllFlyingFlows(ctx)
+			metas, err := rt.fetchAllFlyingProcesses(ctx)
 			if err != nil {
 				rt.errorCount += 1
-				rt.lg.Warn("pull flow meta error", zap.Error(err), zap.Int("errorCount", rt.errorCount))
+				rt.lg.Warn("pull process meta error", zap.Error(err), zap.Int("errorCount", rt.errorCount))
 			} else {
 				rt.errorCount = 0
 				rt.dispatch(ctx, metas)
@@ -308,7 +331,7 @@ func (rt *Runtime) iterate(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case event := <-rt.eventChan:
-			if event == EventFlowComplete {
+			if event == EventComplete {
 				//TODO
 			}
 		}
@@ -345,30 +368,30 @@ func (rt *Runtime) onLockAgentError(reason error) {
 	}
 }
 
-func (rt *Runtime) onFlowComplete(item interface{}) {
-	meta := item.(*FlowMeta)
+func (rt *Runtime) onProcessComplete(item interface{}) {
+	meta := item.(*ProcessMeta)
 	key := rt.getQueueName(meta)
 	rt.shapingManager.Commit(key, meta)
 
-	err := rt.store.DeleteFlowMeta(rt.ctx, meta.uuid)
+	err := rt.store.DeleteProcessMeta(rt.ctx, meta.uuid)
 	if err != nil {
-		rt.lg.Error("delete flow meta failed", zap.Error(err))
+		rt.lg.Error("delete process meta failed", zap.Error(err))
 	}
 	rt.forward()
 }
 
-func (rt *Runtime) onFlowRetry(item interface{}) {
-	meta := item.(*FlowMeta)
+func (rt *Runtime) onProcessRetry(item interface{}) {
+	meta := item.(*ProcessMeta)
 	key := rt.getQueueName(meta)
 	rt.shapingManager.Rollback(key, meta)
 }
 
-func (rt *Runtime) dispatch(ctx context.Context, metas []*FlowMeta) {
+func (rt *Runtime) dispatch(ctx context.Context, metas []*ProcessMeta) {
 	eventsMapQueue := make(map[string]EventQueue)
 
 	for _, meta := range metas {
 		if _, err := Resolve(meta.class); err != nil {
-			rt.lg.Warn("unrecognized flow", zap.Error(err), zap.String("id", meta.uuid))
+			rt.lg.Warn("unrecognized process", zap.Error(err), zap.String("id", meta.uuid))
 			continue
 		}
 
@@ -388,11 +411,11 @@ func (rt *Runtime) dispatch(ctx context.Context, metas []*FlowMeta) {
 	for queueName, queue := range eventsMapQueue {
 		locked, err := rt.lockAgent.AcquireLock(ctx, queueName)
 		if err != nil {
-			rt.lg.Error("acquire flow lock fail", zap.String("key", queueName), zap.Error(err))
+			rt.lg.Error("acquire process lock fail", zap.String("key", queueName), zap.Error(err))
 			continue
 		}
 		if !locked {
-			rt.lg.Info("can't get the flow lock", zap.String("key", queueName))
+			rt.lg.Info("can't get the process lock", zap.String("key", queueName))
 			continue
 		}
 		ownedMapQueue[queueName] = queue
@@ -403,8 +426,8 @@ func (rt *Runtime) dispatch(ctx context.Context, metas []*FlowMeta) {
 	rt.forward()
 }
 
-func (rt *Runtime) getQueueName(meta *FlowMeta) string {
-	queueName := fmt.Sprintf("%s:%s:%s", rt.lockGranularity, meta.UserID, meta.class)
+func (rt *Runtime) getQueueName(meta *ProcessMeta) string {
+	queueName := fmt.Sprintf("%s:%s:%s", rt.lockGranularity, meta.User, meta.class)
 	return queueName
 }
 

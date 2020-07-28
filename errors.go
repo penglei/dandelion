@@ -5,7 +5,7 @@ type BlockError struct {
 }
 
 func (b BlockError) Error() string {
-	return "flow was blocked, caused by " + b.msg
+	return "process was blocked, caused by " + b.msg
 }
 
 var _ error = &BlockError{}

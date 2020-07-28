@@ -2,45 +2,44 @@ package dandelion
 
 import "fmt"
 
-type FlowClass string
+type ProcessClass string
 
-func (c FlowClass) Raw() string {
+func (c ProcessClass) Raw() string {
 	return string(c)
 }
 
-func FlowClassFromRaw(s string) FlowClass {
+func ClassFromRaw(s string) ProcessClass {
 	//TODO Check
-	return FlowClass(s)
+	return ProcessClass(s)
 }
 
-type FlowScheme struct {
-	Name       FlowClass //class
-	NewStorage func() interface{}
-	Steps      func() TaskOrchestration
-	//TODO
-	//OnRunning  func(Context) //call before entering running status
-	//OnCreating func(Context) //first running
-	//OnResuming func(Context) //each of resume running
-	OnSuccess func(Context)
-	OnFailure func(Context)
+type ProcessScheme struct {
+	Name          ProcessClass //class
+	NewStorage    func() interface{}
+	Orchestration func() TaskOrchestration
+	OnStart       func(Context) error //calling before entering running status
+	OnResume      func(Context) error //calling when resuming running status
+	OnSuccess     func(Context)
+	OnFailure     func(Context)
 }
 
-func (f *FlowScheme) NewOrchestration() TaskOrchestration {
-	return f.Steps()
+func (f *ProcessScheme) NewOrchestration() TaskOrchestration {
+	return f.Orchestration()
 }
 
-//TaskOrchestration is associated with each flow(tasks) definition,
-//because of preparing state may require tasks' detail information.
+//TaskOrchestration is associated with each process(tasks) definition,
+//because of preparing planState may require tasks' detail information.
 type TaskOrchestration interface {
-	Prepare(state *FlowExecPlanState)
-	Restore(state *FlowExecPlanState) error
-	Next() []*Task
-	Update([]*Task)
+	Prepare(pstate *PlanState)
+	Restore(pstate *PlanState) error
+	Next() []*RtTask
+	Update([]*RtTask)
 }
 
 type TaskHandle interface {
+	// Predicate() bool
 	Execute(ctx Context) error
-	Predicate() bool
+	// Compensate() error
 }
 
 type TaskFn func(ctx Context) error
@@ -58,35 +57,35 @@ type TaskScheme struct {
 	Task TaskHandle
 }
 
-var flowSchemes = make(map[FlowClass]*FlowScheme)
+var schemes = make(map[ProcessClass]*ProcessScheme)
 
-func Register(f *FlowScheme) {
+func Register(f *ProcessScheme) {
 	var key = f.Name
 
-	if _, ok := flowSchemes[key]; ok {
-		panic(fmt.Sprintf("register flow with key: %s again", key))
+	if _, ok := schemes[key]; ok {
+		panic(fmt.Sprintf("register process with key: %s again", key))
 	}
 
-	//TODO validate FlowScheme.NewStorage return ptr
+	//TODO validate ProcessScheme.NewStorage return ptr
 
-	flowSchemes[f.Name] = f
+	schemes[f.Name] = f
 }
 
-type FlowSchemeInvalid struct {
+type SchemeInvalid struct {
 	name string
 }
 
-func (f FlowSchemeInvalid) Error() string {
-	return fmt.Sprintf("flow scheme(%s) isn't exist", f.name)
+func (f SchemeInvalid) Error() string {
+	return fmt.Sprintf("process scheme(%s) isn't exist", f.name)
 }
 
-var _ error = FlowSchemeInvalid{}
+var _ error = SchemeInvalid{}
 
-func Resolve(name FlowClass) (*FlowScheme, error) {
-	flow, ok := flowSchemes[name]
+func Resolve(name ProcessClass) (*ProcessScheme, error) {
+	s, ok := schemes[name]
 	if ok {
-		return flow, nil
+		return s, nil
 	} else {
-		return nil, FlowSchemeInvalid{name: name.Raw()}
+		return nil, SchemeInvalid{name: name.Raw()}
 	}
 }

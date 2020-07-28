@@ -9,6 +9,7 @@ const (
 	StatusRunning
 	StatusFailure
 	StatusSuccess
+	// StatusCancelled
 )
 
 func (s Status) Raw() database.TypeStatusRaw {
@@ -31,23 +32,4 @@ func (s Status) String() string {
 
 func StatusFromRaw(s database.TypeStatusRaw) Status {
 	return Status(s)
-}
-
-type FlowExecPlanState struct {
-	SpawnedTasks map[string]*Task //TODO sync.map
-}
-
-func NewFlowExecPlanState() *FlowExecPlanState {
-	return &FlowExecPlanState{
-		SpawnedTasks: make(map[string]*Task, 0),
-	}
-}
-
-type FlowRuntimeState struct {
-	status     Status
-	runningCnt int
-}
-
-func (frs *FlowRuntimeState) Clone() FlowRuntimeState {
-	return *frs
 }

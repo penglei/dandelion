@@ -8,47 +8,48 @@ import (
 
 type TypeStatusRaw = int
 
-type FlowDataPartial struct {
+type ProcessDataPartial struct {
 	EventUUID string
-	UserID    string
+	User      string
 	Class     string
 	Status    TypeStatusRaw
 	Storage   []byte
-	State     []byte //internal state
+	State     []byte //internal (PlanState)
 }
 
-type FlowDataObject struct {
-	FlowDataPartial
+type ProcessDataObject struct {
+	ProcessDataPartial
 	ID         int64
 	RunningCnt int
 }
 
-type FlowMetaObject struct {
-	ID     int64
-	UUID   string
-	UserID string
-	Class  string
-	Data   []byte
+type ProcessMetaObject struct {
+	ID    int64
+	UUID  string
+	User  string
+	Class string
+	Data  []byte
 }
 
 type TaskDataObject struct {
-	FlowID   int64
-	Name     string
-	Status   TypeStatusRaw
-	ErrorMsg string
-	Executed bool
+	ProcessID int64
+	Name      string
+	Status    TypeStatusRaw
+	ErrorMsg  string
+	Executed  bool
 	//StartedAt *time.Time
 	//EndedAt   *time.Time
 }
 
 type RuntimeStore interface {
-	LoadUncommittedFlowMeta(context.Context) ([]*FlowMetaObject, error)
-	CreateFlowMeta(ctx context.Context, meta *FlowMetaObject) error
-	DeleteFlowMeta(ctx context.Context, uuid string) error
-	GetOrCreateFlow(context.Context, FlowDataPartial) (FlowDataObject, error)
-	CreatePendingFlow(context.Context, FlowDataPartial) error
-	UpdateFlow(ctx context.Context, obj FlowDataObject, agentName string, mask util.BitMask) error
-	SaveFlowStorage(ctx context.Context, flowId int64, data []byte) error
-	UpsertFlowTask(ctx context.Context, taskData TaskDataObject, mask util.BitMask) error
-	LoadFlowTasks(ctx context.Context, flowId int64) ([]*TaskDataObject, error)
+	LoadUncommittedMeta(context.Context) ([]*ProcessMetaObject, error)
+	CreateProcessMeta(ctx context.Context, meta *ProcessMetaObject) error
+	DeleteProcessMeta(ctx context.Context, uuid string) error
+	GetInstance(ctx context.Context, uuid string) (*ProcessDataObject, error)
+	GetOrCreateInstance(context.Context, ProcessDataPartial) (ProcessDataObject, error)
+	CreatePendingInstance(context.Context, ProcessDataPartial) error
+	UpdateProcess(ctx context.Context, obj ProcessDataObject, agentName string, mask util.BitMask) error
+	SaveProcessStorage(ctx context.Context, processId int64, data []byte) error
+	UpsertTask(ctx context.Context, taskData TaskDataObject, mask util.BitMask) error
+	LoadTasks(ctx context.Context, processId int64) ([]*TaskDataObject, error)
 }

@@ -8,8 +8,8 @@ const (
 )
 
 const (
-	FlowUpdateDefault BitMask = 1 << BitMask(iota)
-	FlowSetStartStat
-	FlowUpdateRunningCnt
-	FlowSetCompleteStat
+	ProcessUpdateDefault BitMask = 1 << BitMask(iota)
+	ProcessSetStartStat
+	ProcessUpdateRunningCnt
+	ProcessSetCompleteStat
 )

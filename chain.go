@@ -4,32 +4,35 @@ import (
 	"errors"
 )
 
-//ChainedFlowTasks creates a chain of tasks to be processed one by one
-type ChainedFlowTasks struct {
-	nextIndex   int     //running task nextIndex cursor
-	tasks       []*Task //spawned tasks
+//Chain creates a chain of tasks to be processed one by one
+type Chain struct {
+	nextIndex   int       //running task nextIndex cursor
+	tasks       []*RtTask //spawned tasks
 	nameSchemes map[string]*TaskScheme
 	schemes     []*TaskScheme
 }
 
-func (c *ChainedFlowTasks) Prepare(state *FlowExecPlanState) {
+func (c *Chain) Prepare(pstate *PlanState) {
 	c.nextIndex = 0
 }
 
-func (c *ChainedFlowTasks) Restore(state *FlowExecPlanState) error {
-	spawnedSize := len(state.SpawnedTasks)
+func (c *Chain) Snapshot() []*RtTask {
+	return c.tasks
+}
+
+func (c *Chain) Restore(pstate *PlanState) error {
+	spawnedSize := len(pstate.SpawnedTasks)
 
 	/*
 		//TODO validate
 		if len(c.schemes) != spawnedSize {
-			//TODO flowSchemeName
-			return fmt.Errorf("flow scheme:%s has been changed", flowSchemeName)
+			return fmt.Errorf("process scheme:%s has been changed", schemeName)
 		}
 	*/
 
 	for i := 0; i < spawnedSize; i += 1 {
 		scheme := c.schemes[i]
-		task := state.SpawnedTasks[scheme.Name]
+		task := pstate.SpawnedTasks[scheme.Name]
 		task.setScheme(scheme)
 		c.tasks = append(c.tasks, task)
 	}
@@ -50,7 +53,7 @@ func (c *ChainedFlowTasks) Restore(state *FlowExecPlanState) error {
 	return nil
 }
 
-func (c *ChainedFlowTasks) Next() []*Task {
+func (c *Chain) Next() []*RtTask {
 	nextIdx := c.nextIndex
 
 	taskCnt := len(c.schemes)
@@ -72,14 +75,13 @@ func (c *ChainedFlowTasks) Next() []*Task {
 	tasks := c.tasks[nextIdx : nextIdx+1]
 	c.nextIndex = nextIdx + 1
 
-
 	//TODO
 	//1. if task status is Blocked
 	//	--> call task Resume method.
 	return tasks
 }
 
-func (c *ChainedFlowTasks) Update(tasks []*Task) {
+func (c *Chain) Update(tasks []*RtTask) {
 	// needn't, these tasks have been append to spawned tasks when were generating
 	//c.tasks = append(c.tasks, tasks...)
 	//c.nextIndex += len(tasks)
@@ -98,7 +100,7 @@ func validateTaskSchemes(taskSchemes []TaskScheme) error {
 	return nil
 }
 
-func NewChainedTasks(taskSchemes []TaskScheme) func() TaskOrchestration {
+func NewChain(taskSchemes []TaskScheme) func() TaskOrchestration {
 	if err := validateTaskSchemes(taskSchemes[:]); err != nil {
 		panic(err)
 	}
@@ -113,19 +115,13 @@ func NewChainedTasks(taskSchemes []TaskScheme) func() TaskOrchestration {
 	}
 
 	return func() TaskOrchestration {
-		return &ChainedFlowTasks{
+		return &Chain{
 			nextIndex:   -1,
 			schemes:     schemes,
 			nameSchemes: nameSchemes,
-			tasks:       make([]*Task, 0),
+			tasks:       make([]*RtTask, 0),
 		}
 	}
 }
 
-var _ TaskOrchestration = &ChainedFlowTasks{}
-
-/*
-func NewChained(flowScheme *FlowScheme) {
-
-}
-*/
+var _ TaskOrchestration = &Chain{}

@@ -12,18 +12,18 @@ type mysqlStore struct {
 	db *sql.DB
 }
 
-func (ms *mysqlStore) LoadUncommittedFlowMeta(ctx context.Context) ([]*database.FlowMetaObject, error) {
-	querySql := "SELECT `id`, `uuid`, `userid`, `class`, `data` FROM flow_meta WHERE `deleted_at` is NULL ORDER BY `id`"
+func (ms *mysqlStore) LoadUncommittedMeta(ctx context.Context) ([]*database.ProcessMetaObject, error) {
+	querySql := "SELECT `id`, `uuid`, `user`, `class`, `data` FROM process_meta WHERE `deleted_at` is NULL ORDER BY `id`"
 	rows, err := ms.db.QueryContext(ctx, querySql)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	results := make([]*database.FlowMetaObject, 0)
+	results := make([]*database.ProcessMetaObject, 0)
 	for rows.Next() {
-		obj := &database.FlowMetaObject{}
-		if err := rows.Scan(&obj.ID, &obj.UUID, &obj.UserID, &obj.Class, &obj.Data); err != nil {
+		obj := &database.ProcessMetaObject{}
+		if err := rows.Scan(&obj.ID, &obj.UUID, &obj.User, &obj.Class, &obj.Data); err != nil {
 			return nil, err
 		}
 		results = append(results, obj)
@@ -32,20 +32,39 @@ func (ms *mysqlStore) LoadUncommittedFlowMeta(ctx context.Context) ([]*database.
 	return results, nil
 }
 
-func (ms *mysqlStore) GetOrCreateFlow(ctx context.Context, data database.FlowDataPartial) (obj database.FlowDataObject, err error) {
+func (ms *mysqlStore) GetInstance(ctx context.Context, uuid string) (*database.ProcessDataObject, error) {
+	tx, err := ms.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	querySql := "SELECT id, storage, status, state, running_cnt FROM process WHERE uuid = ?"
+	obj := &database.ProcessDataObject{}
+	err = tx.QueryRowContext(ctx, querySql, uuid).Scan(&obj.ID, &obj.Storage, &obj.Status, &obj.State, &obj.RunningCnt)
+	if IsNoRowsError(err) {
+		return nil, nil
+	} else if err != nil {
+		return nil, err
+	}
+	return obj, nil
+
+}
+
+func (ms *mysqlStore) GetOrCreateInstance(ctx context.Context, data database.ProcessDataPartial) (obj database.ProcessDataObject, err error) {
 	tx, err := ms.db.Begin()
 	if err != nil {
 		return
 	}
 	defer tx.Rollback()
 
-	obj.FlowDataPartial = data
+	obj.ProcessDataPartial = data
 
-	querySql := "SELECT id, storage, status, state, running_cnt FROM flow WHERE uuid = ?"
+	querySql := "SELECT id, storage, status, state, running_cnt FROM process WHERE uuid = ?"
 	err = tx.QueryRowContext(ctx, querySql, data.EventUUID).Scan(&obj.ID, &obj.Storage, &obj.Status, &obj.State, &obj.RunningCnt)
 	if IsNoRowsError(err) {
 		var id int64
-		id, err = createPendingFlow(ctx, tx, &data)
+		id, err = createPendingProcess(ctx, tx, &data)
 		if err != nil {
 			return
 		}
@@ -56,33 +75,33 @@ func (ms *mysqlStore) GetOrCreateFlow(ctx context.Context, data database.FlowDat
 	return
 }
 
-func createPendingFlow(ctx context.Context, tx *sql.Tx, data *database.FlowDataPartial) (int64, error) {
+func createPendingProcess(ctx context.Context, tx *sql.Tx, data *database.ProcessDataPartial) (int64, error) {
 	//XXX state is empty now, executor will initialize it.
-	createSql := "INSERT INTO flow (uuid, userid, class, status, storage, state) VALUES (?, ?, ?, ?, ?, ?)"
-	result, err := tx.ExecContext(ctx, createSql, data.EventUUID, data.UserID, data.Class, data.Status, data.Storage, data.State)
+	createSql := "INSERT INTO process (uuid, user, class, status, storage, state) VALUES (?, ?, ?, ?, ?, ?)"
+	result, err := tx.ExecContext(ctx, createSql, data.EventUUID, data.User, data.Class, data.Status, data.Storage, data.State)
 	if err != nil {
 		return 0, err
 	}
 	return result.LastInsertId()
 }
 
-func (ms *mysqlStore) CreatePendingFlow(
+func (ms *mysqlStore) CreatePendingInstance(
 	ctx context.Context,
-	data database.FlowDataPartial,
+	data database.ProcessDataPartial,
 ) error {
 	tx, err := ms.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	_, err = createPendingFlow(ctx, tx, &data)
+	_, err = createPendingProcess(ctx, tx, &data)
 	if err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-func (ms *mysqlStore) UpdateFlow(ctx context.Context, obj database.FlowDataObject, agentName string, mask util.BitMask) error {
+func (ms *mysqlStore) UpdateProcess(ctx context.Context, obj database.ProcessDataObject, agentName string, mask util.BitMask) error {
 	tx, err := ms.db.Begin()
 	if err != nil {
 		return err
@@ -92,20 +111,20 @@ func (ms *mysqlStore) UpdateFlow(ctx context.Context, obj database.FlowDataObjec
 	updateFieldsSql := "`status` = ?, `state` = ?, `storage` = ?, `agent_name` = ?"
 	sqlArgs := []interface{}{obj.Status, obj.State, obj.Storage, agentName}
 
-	if mask.Has(util.FlowSetStartStat) {
+	if mask.Has(util.ProcessSetStartStat) {
 		updateFieldsSql += ", `started_at` = NOW()"
 	}
 
-	if mask.Has(util.FlowUpdateRunningCnt) {
+	if mask.Has(util.ProcessUpdateRunningCnt) {
 		updateFieldsSql += ", `running_cnt` = ?"
 		sqlArgs = append(sqlArgs, obj.RunningCnt)
 	}
 
-	if mask.Has(util.FlowSetCompleteStat) {
+	if mask.Has(util.ProcessSetCompleteStat) {
 		updateFieldsSql += ", `ended_at` = NOW()"
 	}
 
-	updateSql := fmt.Sprintf("UPDATE flow SET %s WHERE id = ?", updateFieldsSql)
+	updateSql := fmt.Sprintf("UPDATE process SET %s WHERE id = ?", updateFieldsSql)
 	sqlArgs = append(sqlArgs, obj.ID)
 
 	_, err = tx.ExecContext(ctx, updateSql, sqlArgs...)
@@ -115,15 +134,15 @@ func (ms *mysqlStore) UpdateFlow(ctx context.Context, obj database.FlowDataObjec
 	return tx.Commit()
 }
 
-func (ms *mysqlStore) SaveFlowStorage(ctx context.Context, flowId int64, data []byte) error {
+func (ms *mysqlStore) SaveProcessStorage(ctx context.Context, id int64, data []byte) error {
 	tx, err := ms.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	updateSql := "UPDATE flow SET storage=? WHERE id = ?"
-	_, err = tx.ExecContext(ctx, updateSql, data, flowId)
+	updateSql := "UPDATE process SET storage=? WHERE id = ?"
+	_, err = tx.ExecContext(ctx, updateSql, data, id)
 	if err != nil {
 		return err
 	}
@@ -131,8 +150,7 @@ func (ms *mysqlStore) SaveFlowStorage(ctx context.Context, flowId int64, data []
 	return tx.Commit()
 }
 
-// flowId int64, taskName string, status TypeStatusRaw)
-func (ms *mysqlStore) UpsertFlowTask(ctx context.Context, data database.TaskDataObject, opts util.BitMask) error {
+func (ms *mysqlStore) UpsertTask(ctx context.Context, data database.TaskDataObject, opts util.BitMask) error {
 	tx, err := ms.db.Begin()
 	if err != nil {
 		return err
@@ -140,9 +158,9 @@ func (ms *mysqlStore) UpsertFlowTask(ctx context.Context, data database.TaskData
 	defer tx.Rollback()
 
 	//{insert
-	insertFieldsSql := "`flow_id`, `name`, `status`"
+	insertFieldsSql := "`process_id`, `name`, `status`"
 	insertFieldsSqlPlaceHolder := "?, ?, ?"
-	sqlArgs := []interface{}{data.FlowID, data.Name, data.Status}
+	sqlArgs := []interface{}{data.ProcessID, data.Name, data.Status}
 
 	if opts.Has(util.TaskSetError) {
 		insertFieldsSql += ", `error`"
@@ -170,7 +188,7 @@ func (ms *mysqlStore) UpsertFlowTask(ctx context.Context, data database.TaskData
 	//}
 
 	upsertSql := fmt.Sprintf(
-		"INSERT INTO flow_task (%s) VALUES (%s) ON DUPLICATE KEY UPDATE %s",
+		"INSERT INTO process_task (%s) VALUES (%s) ON DUPLICATE KEY UPDATE %s",
 		insertFieldsSql,
 		insertFieldsSqlPlaceHolder,
 		updateFieldsSql,
@@ -184,21 +202,21 @@ func (ms *mysqlStore) UpsertFlowTask(ctx context.Context, data database.TaskData
 	return tx.Commit()
 }
 
-func (ms *mysqlStore) CreateFlowMeta(ctx context.Context, meta *database.FlowMetaObject) error {
+func (ms *mysqlStore) CreateProcessMeta(ctx context.Context, meta *database.ProcessMetaObject) error {
 	tx, err := ms.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	insertSql := "INSERT INTO flow_meta (uuid, userid, class, data) VALUES (?, ?, ?, ?)"
+	insertSql := "INSERT INTO process_meta (uuid, user, class, data) VALUES (?, ?, ?, ?)"
 
-	result, err := tx.ExecContext(ctx, insertSql, meta.UUID, meta.UserID, meta.Class, meta.Data)
+	result, err := tx.ExecContext(ctx, insertSql, meta.UUID, meta.User, meta.Class, meta.Data)
 	if err != nil {
 		return err
 	}
 
-	flowId, err := result.LastInsertId()
+	insertId, err := result.LastInsertId()
 	if err != nil {
 		return err
 	}
@@ -206,18 +224,18 @@ func (ms *mysqlStore) CreateFlowMeta(ctx context.Context, meta *database.FlowMet
 	if err != nil {
 		return err
 	}
-	meta.ID = flowId
+	meta.ID = insertId
 	return nil
 }
 
-func (ms *mysqlStore) DeleteFlowMeta(ctx context.Context, uuid string) error {
+func (ms *mysqlStore) DeleteProcessMeta(ctx context.Context, uuid string) error {
 	tx, err := ms.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	deleteSql := "DELETE FROM flow_meta WHERE uuid = ?"
+	deleteSql := "DELETE FROM process_meta WHERE uuid = ?"
 
 	result, err := tx.ExecContext(ctx, deleteSql, uuid)
 	if err != nil {
@@ -233,9 +251,9 @@ func (ms *mysqlStore) DeleteFlowMeta(ctx context.Context, uuid string) error {
 	return tx.Commit()
 }
 
-func (ms *mysqlStore) LoadFlowTasks(ctx context.Context, flowId int64) ([]*database.TaskDataObject, error) {
-	querySql := "SELECT `name`, `status`, `executed` FROM flow_task WHERE flow_id = ?"
-	rows, err := ms.db.QueryContext(ctx, querySql, flowId)
+func (ms *mysqlStore) LoadTasks(ctx context.Context, id int64) ([]*database.TaskDataObject, error) {
+	querySql := "SELECT `name`, `status`, `executed` FROM process_task WHERE process_id = ?"
+	rows, err := ms.db.QueryContext(ctx, querySql, id)
 	if err != nil {
 		return nil, err
 	}
@@ -244,7 +262,7 @@ func (ms *mysqlStore) LoadFlowTasks(ctx context.Context, flowId int64) ([]*datab
 	results := make([]*database.TaskDataObject, 0)
 	for rows.Next() {
 		td := &database.TaskDataObject{
-			FlowID: flowId,
+			ProcessID: id,
 		}
 		var executed int
 		if err := rows.Scan(&td.Name, &td.Status, &executed); err != nil {

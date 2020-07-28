@@ -7,61 +7,62 @@ import (
 
 type Context interface {
 	context.Context
+	//Get process storage
 	Global() interface{}
 	Save() error
 	TxSave(func(interface{}) error) error
 }
 
-type flowContext struct {
-	base  context.Context
-	flow  *Flow
-	store RuntimeStore
+type processContext struct {
+	base    context.Context
+	process *RtProcess
+	store   RuntimeStore
 }
 
-func (ctx *flowContext) Deadline() (deadline time.Time, ok bool) {
+func (ctx *processContext) Deadline() (deadline time.Time, ok bool) {
 	return ctx.base.Deadline()
 }
 
-func (ctx *flowContext) Done() <-chan struct{} {
+func (ctx *processContext) Done() <-chan struct{} {
 	return ctx.base.Done()
 }
 
-func (ctx *flowContext) Err() error {
+func (ctx *processContext) Err() error {
 	return ctx.base.Err()
 }
 
-func (ctx *flowContext) Value(key interface{}) interface{} {
+func (ctx *processContext) Value(key interface{}) interface{} {
 	return ctx.base.Value(key)
 }
 
-func (ctx *flowContext) Global() interface{} {
+func (ctx *processContext) Global() interface{} {
 	//TODO log race condition warning
-	return ctx.flow.storage
+	return ctx.process.storage
 }
 
-func (ctx *flowContext) Save() error {
+func (ctx *processContext) Save() error {
 
-	data, err := serializeStorage(ctx.flow.storage)
+	data, err := serializeStorage(ctx.process.storage)
 	if err == nil {
-		err = ctx.store.SaveFlowStorage(ctx, ctx.flow.flowId, data)
+		err = ctx.store.SaveProcessStorage(ctx, ctx.process.id, data)
 	}
 
 	// it needn't to throw out the err.
-	// as flow has cached storage data, flow can continue to run correctly in the future.
+	// as process has cached storage data, process can continue to run correctly in the future.
 	return nil
 }
 
 //TODO implementation
-func (ctx *flowContext) TxSave(cb func(interface{}) error) error {
-	return cb(ctx.flow.storage)
+func (ctx *processContext) TxSave(cb func(interface{}) error) error {
+	return cb(ctx.process.storage)
 }
 
-var _ Context = &flowContext{}
+var _ Context = &processContext{}
 
-func NewFlowContext(ctx context.Context, store RuntimeStore, f *Flow) Context {
-	return &flowContext{
-		base:  ctx,
-		flow:  f,
-		store: store,
+func NewProcessContext(ctx context.Context, store RuntimeStore, f *RtProcess) Context {
+	return &processContext{
+		base:    ctx,
+		process: f,
+		store:   store,
 	}
 }

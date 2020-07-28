@@ -5,7 +5,7 @@ import (
 	"github.com/penglei/dandelion/database"
 )
 
-type flowPlanStateSerializable struct {
+type planStateSerializable struct {
 	SpawnedTasks map[string]taskStateSerializable `json:"spawned_tasks"`
 }
 
@@ -14,8 +14,8 @@ type taskStateSerializable struct {
 	Name   string                 `json:"name"`
 }
 
-func deserializePlanState(data []byte, s *FlowExecPlanState) error {
-	serializableState := &flowPlanStateSerializable{
+func deserializePlanState(data []byte, s *PlanState) error {
+	serializableState := &planStateSerializable{
 		SpawnedTasks: make(map[string]taskStateSerializable),
 	}
 	if err := json.Unmarshal(data, serializableState); err != nil {
@@ -29,12 +29,10 @@ func deserializePlanState(data []byte, s *FlowExecPlanState) error {
 
 }
 
-func serializePlanState(s *FlowExecPlanState) ([]byte, error) {
-
-	serializableState := flowPlanStateSerializable{
+func serializePlanState(s *PlanState) ([]byte, error) {
+	serializableState := planStateSerializable{
 		SpawnedTasks: make(map[string]taskStateSerializable, len(s.SpawnedTasks)),
 	}
-
 	for i, task := range s.SpawnedTasks {
 		taskSerializable := taskStateSerializable{
 			Status: task.status.Raw(),
@@ -42,7 +40,6 @@ func serializePlanState(s *FlowExecPlanState) ([]byte, error) {
 		}
 		serializableState.SpawnedTasks[i] = taskSerializable
 	}
-
 	return json.Marshal(serializableState)
 }
 

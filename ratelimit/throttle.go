@@ -4,7 +4,7 @@ import "container/list"
 
 type EventQueue = *list.List
 
-type FlowShaping interface {
+type Shaping interface {
 	MergeInto(EventQueue)
 	PickOut() []Event
 	Commit(Event)
