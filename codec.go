@@ -23,7 +23,9 @@ func deserializePlanState(data []byte, s *PlanState) error {
 	}
 
 	for name, item := range serializableState.SpawnedTasks {
-		s.SpawnedTasks[name] = newTask(name, StatusFromRaw(item.Status))
+		task := newTask(name, StatusFromRaw(item.Status))
+		//XXX task.executed
+		s.SpawnedTasks[name] = task
 	}
 	return nil
 

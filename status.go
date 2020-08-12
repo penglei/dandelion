@@ -7,6 +7,7 @@ type Status database.TypeStatusRaw
 const (
 	StatusPending Status = iota + 1
 	StatusRunning
+	StatusPausing
 	StatusFailure
 	StatusSuccess
 )
@@ -21,6 +22,8 @@ func (s Status) String() string {
 		return "pending"
 	case StatusRunning:
 		return "running"
+	case StatusPausing:
+		return "pausing"
 	case StatusFailure:
 		return "failed"
 	case StatusSuccess:

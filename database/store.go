@@ -29,6 +29,7 @@ type ProcessMetaObject struct {
 	User  string
 	Class string
 	Data  []byte
+	Rerun int //0:false, 1:true
 }
 
 type TaskDataObject struct {

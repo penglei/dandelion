@@ -59,10 +59,6 @@ func (p *RtProcess) commitStash() {
 	p.runningCnt = stash.runningCnt
 }
 
-func (p *RtProcess) commitStashStatus() {
-	p.status = p.stash.status
-}
-
 func (p *RtProcess) persist(ctx context.Context, store RuntimeStore, masks ...util.BitMask) error {
 	if len(masks) == 0 {
 		masks = append(masks, util.ProcessUpdateDefault)
@@ -99,7 +95,7 @@ func (p *RtProcess) persist(ctx context.Context, store RuntimeStore, masks ...ut
 	return err
 }
 
-func (p *RtProcess) persistStartRunningStat(ctx context.Context, store RuntimeStore) error {
+func (p *RtProcess) persistStartRunningStat(ctx context.Context, store RuntimeStore) {
 	mask := util.ProcessUpdateDefault
 	mask |= util.ProcessUpdateRunningCnt
 	if p.runningCnt == 0 { //first running
@@ -108,9 +104,9 @@ func (p *RtProcess) persistStartRunningStat(ctx context.Context, store RuntimeSt
 	p.stash.runningCnt += 1
 
 	if err := p.persist(ctx, store, mask); err != nil {
+		//TODO logging
 		p.stash.runningCnt -= 1
 	}
-	return nil
 }
 
 func (p *RtProcess) persistEndRunningStat(ctx context.Context, store database.RuntimeStore) error {
@@ -131,7 +127,7 @@ func (p *RtProcess) updateSpawnedTasks(updatingTasks []*RtTask) {
 	p.orchestration.Update(updatingTasks)
 }
 
-func newRtProcess(dbObj database.ProcessDataObject) (*RtProcess, error) {
+func makeRtProcess(dbObj database.ProcessDataObject) (*RtProcess, error) {
 	scheme, err := Resolve(ClassFromRaw(dbObj.Class))
 	if err != nil {
 		return nil, err

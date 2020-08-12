@@ -6,10 +6,10 @@ import (
 
 //Chain creates a chain of tasks to be processed one by one
 type Chain struct {
-	nextIndex   int       //running task nextIndex cursor
-	tasks       []*RtTask //spawned tasks
-	nameSchemes map[string]*TaskScheme
-	schemes     []*TaskScheme
+	nextIndex    int       //running task nextIndex cursor
+	spawnedTasks []*RtTask //spawned tasks
+	nameSchemes  map[string]*TaskScheme
+	schemes      []*TaskScheme
 }
 
 func (c *Chain) Prepare(pstate *PlanState) {
@@ -17,10 +17,10 @@ func (c *Chain) Prepare(pstate *PlanState) {
 }
 
 func (c *Chain) Snapshot() []*RtTask {
-	return c.tasks
+	return c.spawnedTasks
 }
 
-func (c *Chain) Restore(pstate *PlanState) error {
+func (c *Chain) Restore(pstate *PlanState, retryable bool) error {
 	spawnedSize := len(pstate.SpawnedTasks)
 
 	/*
@@ -34,20 +34,28 @@ func (c *Chain) Restore(pstate *PlanState) error {
 		scheme := c.schemes[i]
 		task := pstate.SpawnedTasks[scheme.Name]
 		task.setScheme(scheme)
-		c.tasks = append(c.tasks, task)
+		c.spawnedTasks = append(c.spawnedTasks, task)
 	}
 
 	cursorSetFlag := false
-	for i, task := range c.tasks {
-		if task.status == StatusPending || task.status == StatusRunning {
+	for i, task := range c.spawnedTasks {
+		switch task.status {
+		case StatusPending,
+			StatusRunning:
 			c.nextIndex = i
 			cursorSetFlag = true
 			break
+		case StatusFailure:
+			if retryable {
+				c.nextIndex = i
+				cursorSetFlag = true
+				break
+			}
 		}
 	}
 
 	if !cursorSetFlag {
-		c.nextIndex = len(c.tasks)
+		c.nextIndex = len(c.spawnedTasks)
 	}
 
 	return nil
@@ -63,21 +71,18 @@ func (c *Chain) Next() []*RtTask {
 		return nil
 	}
 
-	lastSpawnedTask := len(c.tasks) - 1
+	lastSpawnedTask := len(c.spawnedTasks) - 1
 	if nextIdx > lastSpawnedTask {
 		// new tasks must be generated
 		scheme := c.schemes[nextIdx]
 		task := newTask(scheme.Name, StatusPending)
 		task.setScheme(scheme)
 
-		c.tasks = append(c.tasks, task)
+		c.spawnedTasks = append(c.spawnedTasks, task)
 	}
-	tasks := c.tasks[nextIdx : nextIdx+1]
+	tasks := c.spawnedTasks[nextIdx : nextIdx+1]
 	c.nextIndex = nextIdx + 1
 
-	//TODO
-	//1. if task status is Blocked
-	//	--> call task Resume method.
 	return tasks
 }
 
@@ -116,10 +121,10 @@ func NewChain(taskSchemes []TaskScheme) func() TaskOrchestration {
 
 	return func() TaskOrchestration {
 		return &Chain{
-			nextIndex:   -1,
-			schemes:     schemes,
-			nameSchemes: nameSchemes,
-			tasks:       make([]*RtTask, 0),
+			nextIndex:    -1,
+			schemes:      schemes,
+			nameSchemes:  nameSchemes,
+			spawnedTasks: make([]*RtTask, 0),
 		}
 	}
 }

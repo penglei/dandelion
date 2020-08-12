@@ -349,6 +349,7 @@ func (rt *Runtime) fetchAllFlyingProcesses(ctx context.Context) ([]*ProcessMeta,
 			User:  obj.User,
 			class: ClassFromRaw(obj.Class),
 			data:  obj.Data,
+			rerun: obj.Rerun == 1,
 		})
 	}
 	return metas, nil
@@ -485,6 +486,7 @@ func (rt *Runtime) forward() {
 	for _, meta := range metas {
 		select {
 		case rt.metaChan <- meta:
+			rt.lg.Info("forward a process", zap.Any("meta", *meta))
 		case <-ctx.Done():
 			return
 		}

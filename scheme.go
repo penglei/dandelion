@@ -15,6 +15,7 @@ func ClassFromRaw(s string) ProcessClass {
 
 type ProcessScheme struct {
 	Name          ProcessClass //class
+	Retryable     bool
 	NewStorage    func() interface{}
 	Orchestration func() TaskOrchestration
 	OnStart       func(Context) error //calling before entering running status
@@ -31,7 +32,7 @@ func (f *ProcessScheme) NewOrchestration() TaskOrchestration {
 //because of preparing planState may require tasks' detail information.
 type TaskOrchestration interface {
 	Prepare(pstate *PlanState)
-	Restore(pstate *PlanState) error
+	Restore(pstate *PlanState, retryable bool) error
 	Next() []*RtTask
 	Update([]*RtTask)
 }

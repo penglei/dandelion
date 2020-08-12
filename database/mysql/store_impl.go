@@ -13,7 +13,7 @@ type mysqlStore struct {
 }
 
 func (ms *mysqlStore) LoadUncommittedMeta(ctx context.Context) ([]*database.ProcessMetaObject, error) {
-	querySql := "SELECT `id`, `uuid`, `user`, `class`, `data` FROM process_meta WHERE `deleted_at` is NULL ORDER BY `id`"
+	querySql := "SELECT `id`, `uuid`, `user`, `class`, `data`, `rerun` FROM process_meta WHERE `deleted_at` is NULL ORDER BY `id`"
 	rows, err := ms.db.QueryContext(ctx, querySql)
 	if err != nil {
 		return nil, err
@@ -23,7 +23,7 @@ func (ms *mysqlStore) LoadUncommittedMeta(ctx context.Context) ([]*database.Proc
 	results := make([]*database.ProcessMetaObject, 0)
 	for rows.Next() {
 		obj := &database.ProcessMetaObject{}
-		if err := rows.Scan(&obj.ID, &obj.UUID, &obj.User, &obj.Class, &obj.Data); err != nil {
+		if err := rows.Scan(&obj.ID, &obj.UUID, &obj.User, &obj.Class, &obj.Data, &obj.Rerun); err != nil {
 			return nil, err
 		}
 		results = append(results, obj)
@@ -39,9 +39,18 @@ func (ms *mysqlStore) GetInstance(ctx context.Context, uuid string) (*database.P
 	}
 	defer tx.Rollback()
 
-	querySql := "SELECT id, storage, status, plan_state, running_cnt FROM process WHERE uuid = ?"
+	querySql := "SELECT id, storage, status, plan_state, running_cnt, `user`, `class`, `uuid` FROM process WHERE uuid = ?"
 	obj := &database.ProcessDataObject{}
-	err = tx.QueryRowContext(ctx, querySql, uuid).Scan(&obj.ID, &obj.Storage, &obj.Status, &obj.PlanState, &obj.RunningCnt)
+	err = tx.QueryRowContext(ctx, querySql, uuid).Scan(
+		&obj.ID,
+		&obj.Storage,
+		&obj.Status,
+		&obj.PlanState,
+		&obj.RunningCnt,
+		&obj.User,
+		&obj.Class,
+		&obj.Uuid,
+	)
 	if IsNoRowsError(err) {
 		return nil, nil
 	} else if err != nil {
