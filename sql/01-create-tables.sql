@@ -21,7 +21,7 @@ CREATE TABLE process_meta
     `deleted_flag` BIGINT(11) NOT NULL DEFAULT 0, -- TODO not implement
     PRIMARY KEY (`id`),
     KEY `idx_user_class_queue` (`user`, `class`),
-    UNIQUE KEY `idx_flow_meta_uuid` (`uuid`, `rerun`)
+    UNIQUE KEY `idx_unique_process_rerun` (`uuid`, `rerun`)
 )
     AUTO_INCREMENT = 1
     DEFAULT CHARSET = utf8mb4;
@@ -55,7 +55,7 @@ CREATE TABLE process
     `created_at`   TIMESTAMP  NOT NULL DEFAULT NOW(),
     `deleted_at`   TIMESTAMP           DEFAULT NULL,
     `deleted_flag` BIGINT(11) NOT NULL DEFAULT 0,  -- TODO not implement
-    UNIQUE KEY `idx_flow_uuid` (`uuid`),
+    UNIQUE KEY `idx_unique_uuid` (`uuid`),
     PRIMARY KEY (`id`)
 )
     AUTO_INCREMENT = 1
@@ -71,7 +71,7 @@ CREATE TABLE process_task
     `started_at` TIMESTAMP           DEFAULT NULL,
     `ended_at`   TIMESTAMP           DEFAULT NULL,
     `executed`   TINYINT(1) NOT NULL DEFAULT 0,
-    UNIQUE KEY `idx_flow_task` (`process_id`, `name`),
+    UNIQUE KEY `idx_unique_process_task` (`process_id`, `name`),
     PRIMARY KEY (`id`)
 )
     AUTO_INCREMENT = 1
