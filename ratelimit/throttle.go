@@ -2,16 +2,16 @@ package ratelimit
 
 import "container/list"
 
-type EventQueue = *list.List
+type Sequence = *list.List
 
-type Shaping interface {
-	MergeInto(EventQueue)
-	PickOut() []Event
-	Commit(Event)
+type Shaper interface {
+	MergeInto(Sequence)
+	PickOut() []OrderedMeta
+	Commit(OrderedMeta)
 	Rollback(int64)
 }
 
-type Event interface {
+type OrderedMeta interface {
 	GetOffset() int64
 	GetUUID() string
 }

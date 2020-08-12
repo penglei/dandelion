@@ -371,6 +371,10 @@ func (e *Executor) do(ctx context.Context, meta *ProcessMeta) {
 	e.spawn(ctx, p)
 }
 
+func (e *Executor) resume(ctx context.Context, uuid string) {
+
+}
+
 func (e *Executor) Bootstrap(ctx context.Context, metaChan <-chan *ProcessMeta) {
 	ctx = context.WithValue(ctx, contextAgentNameKey, e.name)
 	for {

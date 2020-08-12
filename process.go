@@ -12,6 +12,7 @@ type ProcessMeta struct {
 	User  string
 	class ProcessClass
 	data  []byte
+	rerun bool
 }
 
 func (m *ProcessMeta) GetOffset() int64 {

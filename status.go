@@ -9,7 +9,6 @@ const (
 	StatusRunning
 	StatusFailure
 	StatusSuccess
-	// StatusCancelled
 )
 
 func (s Status) Raw() database.TypeStatusRaw {

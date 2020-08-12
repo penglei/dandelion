@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/pborman/uuid"
 	"github.com/penglei/dandelion/database"
@@ -15,7 +16,7 @@ import (
 	"time"
 )
 
-type EventQueue = ratelimit.EventQueue
+type Sequence = ratelimit.Sequence
 
 const (
 	PollInterval         = time.Second * 3
@@ -23,32 +24,21 @@ const (
 	LockHeartbeat        = time.Second * 3
 )
 
-type ShapingManager struct {
-	mutex sync.Mutex
-	sinks map[string]ratelimit.Shaping
-}
-
-type Process struct {
-	Uuid    string
-	Class   string
-	Status  Status
-	storage []byte
-}
-
-func (p *Process) UnmarshalState(state interface{}) error {
-	return deserializeStorage(p.storage, state)
-}
-
 //concentrator
-func (m *ShapingManager) AddQueues(queues map[string]EventQueue) {
+type ShapingManager struct {
+	mutex  sync.Mutex
+	queues map[string]ratelimit.Shaper
+}
+
+func (m *ShapingManager) AddQueues(queues map[string]Sequence) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
 	for key, metas := range queues {
-		q, ok := m.sinks[key]
+		q, ok := m.queues[key]
 		if !ok {
 			q = ratelimit.NewQueuedThrottle(metas)
-			m.sinks[key] = q
+			m.queues[key] = q
 		} else {
 			q.MergeInto(metas)
 		}
@@ -58,12 +48,12 @@ func (m *ShapingManager) AddQueues(queues map[string]EventQueue) {
 func (m *ShapingManager) DropAllQueues() {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
-	m.sinks = make(map[string]ratelimit.Shaping)
+	m.queues = make(map[string]ratelimit.Shaper)
 }
 
 func (m *ShapingManager) Remove(key string) {
 	m.mutex.Lock()
-	delete(m.sinks, key)
+	delete(m.queues, key)
 	m.mutex.Unlock()
 }
 
@@ -71,13 +61,13 @@ func (m *ShapingManager) PickOutAll() []*ProcessMeta {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	events := make([]ratelimit.Event, 0)
-	for _, q := range m.sinks {
-		events = append(events, q.PickOut()...)
+	origins := make([]ratelimit.OrderedMeta, 0)
+	for _, q := range m.queues {
+		origins = append(origins, q.PickOut()...)
 	}
 
-	metas := make([]*ProcessMeta, 0, len(events))
-	for _, e := range events {
+	metas := make([]*ProcessMeta, 0, len(origins))
+	for _, e := range origins {
 		metas = append(metas, e.(*ProcessMeta))
 	}
 	return metas
@@ -87,7 +77,7 @@ func (m *ShapingManager) Commit(key string, meta *ProcessMeta) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	q, ok := m.sinks[key]
+	q, ok := m.queues[key]
 	if ok {
 		q.Commit(meta)
 	}
@@ -97,7 +87,7 @@ func (m *ShapingManager) Rollback(key string, meta *ProcessMeta) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	q, ok := m.sinks[key]
+	q, ok := m.queues[key]
 	if ok {
 		q.Rollback(meta.GetOffset())
 	}
@@ -105,9 +95,21 @@ func (m *ShapingManager) Rollback(key string, meta *ProcessMeta) {
 
 func NewShapingManager() *ShapingManager {
 	return &ShapingManager{
-		mutex: sync.Mutex{},
-		sinks: make(map[string]ratelimit.Shaping),
+		mutex:  sync.Mutex{},
+		queues: make(map[string]ratelimit.Shaper),
 	}
+}
+
+//export
+type Process struct {
+	Uuid    string
+	Class   string
+	Status  Status
+	storage []byte
+}
+
+func (p *Process) UnmarshalState(state interface{}) error {
+	return deserializeStorage(p.storage, state)
 }
 
 type RuntimeBuilder struct {
@@ -219,7 +221,7 @@ func NewDefaultRuntime(name string, db *sql.DB) *Runtime {
 	return builder.Build()
 }
 
-//bootstrap event consumer and process executor
+//bootstrap consumer and process executor
 func (rt *Runtime) Bootstrap(ctx context.Context) error {
 	rt.ctx = ctx
 	err := rt.lockAgent.Bootstrap(rt.ctx, rt.onLockAgentError)
@@ -279,7 +281,25 @@ func (rt *Runtime) Submit(
 	return dbMeta.UUID, nil
 }
 
-func (rt *Runtime) Resume(uuid string) error {
+func (rt *Runtime) Resume(ctx context.Context, uuid string) error {
+	processData, err := rt.store.GetInstance(ctx, uuid)
+	if err != nil {
+		return err
+	}
+	if processData == nil {
+		return errors.New("process instance not found: " + uuid)
+	}
+
+	meta := &ProcessMeta{
+		id:    processData.ID,
+		uuid:  processData.Uuid,
+		rerun: true,
+		//User:  processData.User,
+		//class: ClassFromRaw(processData.Class),
+	}
+
+	rt.dispatch(ctx, []*ProcessMeta{meta})
+
 	return nil
 }
 
@@ -381,6 +401,7 @@ func (rt *Runtime) onLockAgentError(reason error) {
 }
 
 func (rt *Runtime) onProcessComplete(item interface{}) {
+	//TODO send to eventChan and process by dispatch routine
 	meta := item.(*ProcessMeta)
 	key := rt.getQueueName(meta)
 	rt.shapingManager.Commit(key, meta)
@@ -393,13 +414,14 @@ func (rt *Runtime) onProcessComplete(item interface{}) {
 }
 
 func (rt *Runtime) onProcessInternalRetry(item interface{}) {
+	//TODO send to eventChan and process by dispatch routine
 	meta := item.(*ProcessMeta)
 	key := rt.getQueueName(meta)
 	rt.shapingManager.Rollback(key, meta)
 }
 
 func (rt *Runtime) dispatch(ctx context.Context, metas []*ProcessMeta) {
-	eventsMapQueue := make(map[string]EventQueue)
+	eventsMapQueue := make(map[string]Sequence)
 
 	for _, meta := range metas {
 		if _, err := Resolve(meta.class); err != nil {
@@ -417,7 +439,7 @@ func (rt *Runtime) dispatch(ctx context.Context, metas []*ProcessMeta) {
 		userClassQueue.PushBack(meta)
 	}
 
-	ownedMapQueue := make(map[string]EventQueue)
+	ownedMapQueue := make(map[string]Sequence)
 	rt.lockAgentMutex.RLock()
 	defer rt.lockAgentMutex.RUnlock()
 	for queueName, queue := range eventsMapQueue {
