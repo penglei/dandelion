@@ -9,12 +9,12 @@ import (
 type TypeStatusRaw = int
 
 type ProcessDataPartial struct {
-	EventUUID string
+	Uuid      string
 	User      string
 	Class     string
 	Status    TypeStatusRaw
 	Storage   []byte
-	State     []byte //internal (PlanState)
+	PlanState []byte //internal
 }
 
 type ProcessDataObject struct {

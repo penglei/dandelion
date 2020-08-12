@@ -7,6 +7,7 @@ import (
 	"github.com/penglei/dandelion/util"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
+	"runtime/debug"
 	"strings"
 	"sync"
 )
@@ -85,7 +86,7 @@ func (tes *taskErrorSanitation) AddError(taskName string, err error) {
 
 type Executor struct {
 	name     string
-	lg       *zap.Logger
+	lgr      *zap.Logger
 	store    database.RuntimeStore
 	notifier *Notifier
 }
@@ -97,51 +98,47 @@ func (e *Executor) dealTaskRunning(ctx context.Context, f *RtProcess, t *RtTask)
 			return internalError{err}
 		}
 
-		proccessContext := NewProcessContext(ctx, e.store, f)
+		processContext := NewProcessContext(ctx, e.store, f)
 		var taskError = func() (err error) {
 			defer func() {
 				if p := recover(); p != nil {
-					err = fmt.Errorf("task(%s, %s) panic: %v", f.uuid, t.name, p)
+					err = fmt.Errorf("task(%s, %s) panic: %v\n%s", f.uuid, t.name, p, debug.Stack())
 				}
 			}()
 
-			return t.scheme.Task.Execute(proccessContext)
+			return t.scheme.Task.Execute(processContext)
 		}()
 
 		if taskError != nil {
-			//{
 			t.setStatus(StatusFailure)
 			t.setError(taskError)
 			if err := t.persistTask(ctx, e.store, f.id, util.TaskSetError|util.TaskSetFinishStat); err != nil {
-				e.lg.Debug("task execution failed, and status save failed",
+				e.lgr.Debug("task execution failed, and status save failed",
 					zap.Error(taskError),
 					zap.String("id", f.uuid),
 					zap.String("task_name", t.name))
 			}
-			//}
 
 			return taskError
 		} else {
-			//{
 			t.setStatus(StatusSuccess)
 			err := t.persistTask(ctx, e.store, f.id, util.TaskUpdateDefault|util.TaskSetFinishStat)
 			if err != nil {
-				e.lg.Error("task execution successful, but status save failed",
+				e.lgr.Error("task execution successful, but status save failed",
 					zap.String("id", f.uuid),
 					zap.String("task_name", t.name))
 				return nil
 			}
-			//}
 			return nil
 		}
 	} else {
 		// This case is generally not present, and if it does, we can only assume that the task failed.
 		//{
-		err := fmt.Errorf("task(%s, %s) failed unexpectedly, maybe task original status has saved failed", f.uuid, t.name)
+		err := fmt.Errorf("task(%s, %s) failed unexpectedly, maybe task'status saved failed", f.uuid, t.name)
 		t.setStatus(StatusFailure)
 		t.setError(err)
 		if err := t.persistTask(ctx, e.store, f.id, util.TaskSetError|util.TaskSetFinishStat); err != nil {
-			e.lg.Error("task failure status didn't save",
+			e.lgr.Error("task failure status didn't save",
 				zap.String("id", f.uuid),
 				zap.String("task_name", t.name))
 		}
@@ -178,7 +175,7 @@ func (e *Executor) dealPending(ctx context.Context, f *RtProcess) error {
 
 	f.setStatus(StatusRunning)
 	//our fsm principle: next STATUS(here is Running) must be saved in persistent storage
-	//before the function for the next STATUS runs
+	//before running the function of the next STATUS
 	err := f.persist(ctx, e.store, util.ProcessUpdateDefault)
 	return err
 }
@@ -237,6 +234,11 @@ func (e *Executor) dealRunning(ctx context.Context, p *RtProcess) error {
 		wg := &sync.WaitGroup{}
 		wg.Add(len(partialTasks))
 		for _, task := range partialTasks {
+			e.lgr.Info("run task",
+				zap.String("instance", p.uuid),
+				zap.Any("process", p.scheme.Name),
+				zap.String("task", task.name),
+			)
 			go func(t *RtTask) {
 				defer wg.Done()
 				taskRunErr := e.runTask(ctx, p, t)
@@ -258,17 +260,17 @@ func (e *Executor) dealRunning(ctx context.Context, p *RtProcess) error {
 			return tes.GetErrors()
 		}
 
-		e.lg.Debug("run process got error", zap.Error(tes.GetErrors()))
+		e.lgr.Error("run process got error", zap.Error(tes.GetErrors()))
 		p.setStatus(StatusFailure)
 		err := p.persist(ctx, e.store, util.ProcessUpdateDefault)
 		if err != nil {
-			e.lg.Debug("update process to status failed", zap.Int("status", int(StatusFailure)), zap.Error(err))
+			e.lgr.Debug("update process to status failed", zap.Int("status", int(StatusFailure)), zap.Error(err))
 		}
 	} else {
 		p.setStatus(StatusSuccess)
 		err := p.persist(ctx, e.store, util.ProcessUpdateDefault)
 		if err != nil {
-			e.lg.Debug("failed to update process status", zap.Int("status", int(StatusSuccess)), zap.Error(err))
+			e.lgr.Debug("failed to update process status", zap.Int("status", int(StatusSuccess)), zap.Error(err))
 		}
 	}
 	return nil
@@ -293,14 +295,14 @@ func (e *Executor) dealFailure(ctx context.Context, p *RtProcess) {
 }
 
 func (e *Executor) doCompleteStat(ctx context.Context, p *RtProcess) {
-	e.lg.Debug("process execute completely",
+	e.lgr.Debug("process execute completely",
 		zap.Any("process name", p.scheme.Name),
 		zap.String("id", p.uuid),
 		zap.String("status", p.status.String()))
 
 	err := p.persistEndRunningStat(ctx, e.store)
 	if err != nil {
-		e.lg.Error("save last stat error", zap.Error(err))
+		e.lgr.Error("save last stat error", zap.Error(err))
 	}
 }
 
@@ -309,21 +311,26 @@ func (e *Executor) spawn(ctx context.Context, p *RtProcess) {
 		switch p.status {
 		case StatusPending:
 			if err := e.dealPending(ctx, p); err != nil {
-				e.lg.Error("process dealPending error",
-					zap.Any("process name", p.scheme.Name),
+				e.lgr.Error("process dealPending error",
+					zap.Any("name", p.scheme.Name),
 					zap.String("id", p.uuid),
 					zap.Error(err))
-				e.notifier.TriggerRetry(ctx.Value(contextMetaKey))
+				e.notifier.TriggerInternalRetry(ctx.Value(contextMetaKey))
 				return
 			}
-		case StatusRunning: //resume the process terminated accidently in the past...
+		case StatusRunning: //resume the process terminated accidentally in the past...
 			err := e.dealRunning(ctx, p)
 			if err != nil {
-				e.lg.Error("process dealRunning error",
+				e.lgr.Error("process dealRunning error",
 					zap.Any("process name", p.scheme.Name),
 					zap.String("id", p.uuid),
-					zap.Error(err))
-				e.notifier.TriggerRetry(ctx.Value(contextMetaKey))
+					zap.Error(err),
+				)
+
+				//if errors.Is(err, HaltingError) {
+				//}
+
+				e.notifier.TriggerInternalRetry(ctx.Value(contextMetaKey))
 				return
 			}
 		case StatusSuccess:
@@ -332,10 +339,6 @@ func (e *Executor) spawn(ctx context.Context, p *RtProcess) {
 		case StatusFailure:
 			e.dealFailure(ctx, p)
 			return
-		// case Block
-		// 1. find current blocked tasks
-		// 2. call each task predicate method to check whether it run again
-		// 3. if one task predicate is satisfy, call it
 		default:
 			panic("unknown process status")
 		}
@@ -345,23 +348,23 @@ func (e *Executor) spawn(ctx context.Context, p *RtProcess) {
 func (e *Executor) do(ctx context.Context, meta *ProcessMeta) {
 	ctx = context.WithValue(ctx, contextMetaKey, meta)
 
-	e.lg.Debug("run process", zap.String("id", meta.uuid))
+	e.lgr.Debug("run process", zap.String("id", meta.uuid), zap.String("name", meta.class.Raw()))
 
 	data, err := newPendingProcessData(meta.uuid, meta.User, meta.class, meta.data)
 	if err != nil {
-		e.lg.Warn("new pending process error", zap.String("id", meta.uuid), zap.Error(err))
+		e.lgr.Warn("new pending process error", zap.String("id", meta.uuid), zap.Error(err))
 		return
 	}
 
 	obj, err := e.store.GetOrCreateInstance(ctx, *data)
 	if err != nil {
-		e.lg.Warn("get or create process error", zap.String("id", meta.uuid), zap.Error(err))
+		e.lgr.Warn("get or create process error", zap.String("id", meta.uuid), zap.Error(err))
 		return
 	}
 
 	p, err := newRtProcess(obj)
 	if err != nil {
-		e.lg.Warn("create process error", zap.String("id", meta.uuid), zap.Error(err))
+		e.lgr.Warn("create process error", zap.String("id", meta.uuid), zap.Error(err))
 		return
 	}
 
@@ -387,7 +390,7 @@ func (e *Executor) Terminate() {
 func NewExecutor(name string, notifyAgent *Notifier, store RuntimeStore, lg *zap.Logger) *Executor {
 	return &Executor{
 		name:     name,
-		lg:       lg,
+		lgr:      lg,
 		store:    store,
 		notifier: notifyAgent,
 	}
@@ -411,12 +414,12 @@ func newPendingProcessData(
 		return nil, err
 	}
 	dbDataPartial := &database.ProcessDataPartial{
-		EventUUID: uuid,
+		Uuid:      uuid,
 		User:      user,
 		Class:     class.Raw(),
 		Status:    StatusPending.Raw(),
 		Storage:   storage,
-		State:     pstateBytes,
+		PlanState: pstateBytes,
 	}
 	return dbDataPartial, nil
 }

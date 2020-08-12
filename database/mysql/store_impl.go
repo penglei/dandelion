@@ -39,9 +39,9 @@ func (ms *mysqlStore) GetInstance(ctx context.Context, uuid string) (*database.P
 	}
 	defer tx.Rollback()
 
-	querySql := "SELECT id, storage, status, state, running_cnt FROM process WHERE uuid = ?"
+	querySql := "SELECT id, storage, status, plan_state, running_cnt FROM process WHERE uuid = ?"
 	obj := &database.ProcessDataObject{}
-	err = tx.QueryRowContext(ctx, querySql, uuid).Scan(&obj.ID, &obj.Storage, &obj.Status, &obj.State, &obj.RunningCnt)
+	err = tx.QueryRowContext(ctx, querySql, uuid).Scan(&obj.ID, &obj.Storage, &obj.Status, &obj.PlanState, &obj.RunningCnt)
 	if IsNoRowsError(err) {
 		return nil, nil
 	} else if err != nil {
@@ -60,8 +60,8 @@ func (ms *mysqlStore) GetOrCreateInstance(ctx context.Context, data database.Pro
 
 	obj.ProcessDataPartial = data
 
-	querySql := "SELECT id, storage, status, state, running_cnt FROM process WHERE uuid = ?"
-	err = tx.QueryRowContext(ctx, querySql, data.EventUUID).Scan(&obj.ID, &obj.Storage, &obj.Status, &obj.State, &obj.RunningCnt)
+	querySql := "SELECT id, storage, status, plan_state, running_cnt FROM process WHERE uuid = ?"
+	err = tx.QueryRowContext(ctx, querySql, data.Uuid).Scan(&obj.ID, &obj.Storage, &obj.Status, &obj.PlanState, &obj.RunningCnt)
 	if IsNoRowsError(err) {
 		var id int64
 		id, err = createPendingProcess(ctx, tx, &data)
@@ -76,9 +76,9 @@ func (ms *mysqlStore) GetOrCreateInstance(ctx context.Context, data database.Pro
 }
 
 func createPendingProcess(ctx context.Context, tx *sql.Tx, data *database.ProcessDataPartial) (int64, error) {
-	//XXX state is empty now, executor will initialize it.
-	createSql := "INSERT INTO process (uuid, user, class, status, storage, state) VALUES (?, ?, ?, ?, ?, ?)"
-	result, err := tx.ExecContext(ctx, createSql, data.EventUUID, data.User, data.Class, data.Status, data.Storage, data.State)
+	//XXX plan_state is empty now, executor will initialize it.
+	createSql := "INSERT INTO process (uuid, user, class, status, storage, plan_state) VALUES (?, ?, ?, ?, ?, ?)"
+	result, err := tx.ExecContext(ctx, createSql, data.Uuid, data.User, data.Class, data.Status, data.Storage, data.PlanState)
 	if err != nil {
 		return 0, err
 	}
@@ -108,8 +108,8 @@ func (ms *mysqlStore) UpdateProcess(ctx context.Context, obj database.ProcessDat
 	}
 	defer tx.Rollback()
 
-	updateFieldsSql := "`status` = ?, `state` = ?, `storage` = ?, `agent_name` = ?"
-	sqlArgs := []interface{}{obj.Status, obj.State, obj.Storage, agentName}
+	updateFieldsSql := "`status` = ?, `plan_state` = ?, `storage` = ?, `agent_name` = ?"
+	sqlArgs := []interface{}{obj.Status, obj.PlanState, obj.Storage, agentName}
 
 	if mask.Has(util.ProcessSetStartStat) {
 		updateFieldsSql += ", `started_at` = NOW()"

@@ -46,7 +46,7 @@ CREATE TABLE process
     `class`        CHAR(32)   NOT NULL DEFAULT '',
     `storage`      TEXT       NOT NULL,
     `status`       CHAR(16)   NOT NULL DEFAULT '', -- pending, running, success, failure
-    `state`        TEXT       NOT NULL,
+    `plan_state`   TEXT       NOT NULL,
     `running_cnt`  INT(11)    NOT NULL DEFAULT 0,
     `started_at`   TIMESTAMP           DEFAULT NULL,
     `ended_at`     TIMESTAMP           DEFAULT NULL,

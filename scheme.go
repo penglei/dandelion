@@ -63,7 +63,7 @@ func Register(f *ProcessScheme) {
 	var key = f.Name
 
 	if _, ok := schemes[key]; ok {
-		panic(fmt.Sprintf("register process with key: %s again", key))
+		panic(fmt.Sprintf("register process with key(%s) again", key))
 	}
 
 	//TODO validate ProcessScheme.NewStorage return ptr

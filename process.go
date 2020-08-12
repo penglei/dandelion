@@ -75,9 +75,9 @@ func (p *RtProcess) persist(ctx context.Context, store RuntimeStore, mask util.B
 
 	obj := database.ProcessDataObject{
 		ProcessDataPartial: database.ProcessDataPartial{
-			Status:  p.stash.status.Raw(), //read from stash
-			Storage: storage,
-			State:   pstate,
+			Status:    p.stash.status.Raw(), //read from stash
+			Storage:   storage,
+			PlanState: pstate,
 		},
 		ID:         p.id,
 		RunningCnt: p.stash.runningCnt, //read from stash
@@ -141,7 +141,7 @@ func newRtProcess(dbObj database.ProcessDataObject) (*RtProcess, error) {
 	orchestration := scheme.NewOrchestration()
 	pstate := NewPlanState()
 
-	if err = deserializePlanState(dbObj.State, pstate); err != nil {
+	if err = deserializePlanState(dbObj.PlanState, pstate); err != nil {
 		return nil, err
 	}
 
@@ -153,7 +153,7 @@ func newRtProcess(dbObj database.ProcessDataObject) (*RtProcess, error) {
 	p := &RtProcess{
 		ProcessRuntimeState: runtimeState,
 		id:                  dbObj.ID,
-		uuid:                dbObj.EventUUID,
+		uuid:                dbObj.Uuid,
 		planState:           pstate,
 		scheme:              scheme,
 		orchestration:       orchestration,
@@ -162,4 +162,3 @@ func newRtProcess(dbObj database.ProcessDataObject) (*RtProcess, error) {
 	}
 	return p, nil
 }
-

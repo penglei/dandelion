@@ -1,22 +1,21 @@
 package dandelion
 
-type BlockError struct {
+import "errors"
+
+type Halting struct {
 	msg string
 }
 
-func (b BlockError) Error() string {
+func (b Halting) Error() string {
 	return "process was blocked, caused by " + b.msg
 }
 
-var _ error = &BlockError{}
+var _ error = &Halting{}
 
-func NewBlockError(msg string) *BlockError {
-	return &BlockError{
+func NewHaltingError(msg string) *Halting {
+	return &Halting{
 		msg: msg,
 	}
 }
 
-func IsBlockError(err error) bool {
-	_, ok := err.(*BlockError)
-	return ok
-}
+var HaltingError = errors.New("process halted")

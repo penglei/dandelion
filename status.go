@@ -23,9 +23,9 @@ func (s Status) String() string {
 	case StatusRunning:
 		return "running"
 	case StatusFailure:
-		return "failure"
+		return "failed"
 	case StatusSuccess:
-		return "success"
+		return "successful"
 	}
 	return ""
 }

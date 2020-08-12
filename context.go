@@ -11,6 +11,7 @@ type Context interface {
 	Global() interface{}
 	Save() error
 	TxSave(func(interface{}) error) error
+	ProcessId() string
 }
 
 type processContext struct {
@@ -38,6 +39,10 @@ func (ctx *processContext) Value(key interface{}) interface{} {
 func (ctx *processContext) Global() interface{} {
 	//TODO log race condition warning
 	return ctx.process.storage
+}
+
+func (ctx *processContext) ProcessId() string {
+	return ctx.process.uuid
 }
 
 func (ctx *processContext) Save() error {

@@ -28,6 +28,17 @@ type ShapingManager struct {
 	sinks map[string]ratelimit.Shaping
 }
 
+type Process struct {
+	Uuid    string
+	Class   string
+	Status  Status
+	storage []byte
+}
+
+func (p *Process) UnmarshalState(state interface{}) error {
+	return deserializeStorage(p.storage, state)
+}
+
 //concentrator
 func (m *ShapingManager) AddQueues(queues map[string]EventQueue) {
 	m.mutex.Lock()
@@ -226,7 +237,7 @@ func (rt *Runtime) Bootstrap(ctx context.Context) error {
 
 	notifyAgent := &Notifier{}
 	notifyAgent.RegisterProcessComplete(rt.onProcessComplete)
-	notifyAgent.RegisterProcessRetry(rt.onProcessRetry)
+	notifyAgent.RegisterProcessInternalRetry(rt.onProcessInternalRetry)
 
 	for i := 0; i < rt.workerNum; i += 1 {
 		executor := NewExecutor(rt.name, notifyAgent, rt.store, rt.lg)
@@ -275,25 +286,29 @@ func (rt *Runtime) Stop(uuid string) error {
 	return nil
 }
 
-/*
-func (rt *Runtime) GetProcess(ctx context.Context, uuid string) error {
-	processObj, err := rt.store.GetInstance(ctx, uuid)
+func (rt *Runtime) GetProcess(ctx context.Context, uuid string) (*Process, error) {
+	processData, err := rt.store.GetInstance(ctx, uuid)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if processObj == nil {
-		return nil // TODO
+	if processData == nil {
+		return nil, nil
 	}
 
-	scheme, err := Resolve(ClassFromRaw(processObj.Class))
-	if err != nil {
-		return err
+	p := &Process{
+		Uuid:    processData.Uuid,
+		Class:   processData.Class,
+		Status:  StatusFromRaw(processData.Status),
+		storage: processData.Storage,
 	}
-	orch := scheme.NewOrchestration()
-
-	return nil
+	/*
+		scheme, err := Resolve(ClassFromRaw(processObj.Class))
+		if err != nil {
+			return err
+		}
+	*/
+	return p, nil
 }
-*/
 
 func (rt *Runtime) fetchAllFlyingProcesses(ctx context.Context) ([]*ProcessMeta, error) {
 	objects, err := rt.store.LoadUncommittedMeta(ctx)
@@ -380,7 +395,7 @@ func (rt *Runtime) onProcessComplete(item interface{}) {
 	rt.forward()
 }
 
-func (rt *Runtime) onProcessRetry(item interface{}) {
+func (rt *Runtime) onProcessInternalRetry(item interface{}) {
 	meta := item.(*ProcessMeta)
 	key := rt.getQueueName(meta)
 	rt.shapingManager.Rollback(key, meta)
