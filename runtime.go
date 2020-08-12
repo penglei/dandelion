@@ -186,6 +186,7 @@ func WithDB(db *sql.DB) Option {
 	}
 }
 
+//TODO
 type Event int
 
 const EventComplete Event = 1
@@ -279,10 +280,6 @@ func (rt *Runtime) Submit(
 }
 
 func (rt *Runtime) Resume(uuid string) error {
-	return nil
-}
-
-func (rt *Runtime) Stop(uuid string) error {
 	return nil
 }
 

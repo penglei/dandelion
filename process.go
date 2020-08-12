@@ -62,7 +62,11 @@ func (p *RtProcess) commitStashStatus() {
 	p.status = p.stash.status
 }
 
-func (p *RtProcess) persist(ctx context.Context, store RuntimeStore, mask util.BitMask) error {
+func (p *RtProcess) persist(ctx context.Context, store RuntimeStore, masks ...util.BitMask) error {
+	if len(masks) == 0 {
+		masks = append(masks, util.ProcessUpdateDefault)
+	}
+
 	//update default properties: storage, planState, status
 	storage, err := serializeStorage(p.storage)
 	if err != nil {
@@ -84,7 +88,7 @@ func (p *RtProcess) persist(ctx context.Context, store RuntimeStore, mask util.B
 	}
 	agentName := ctx.Value(contextAgentNameKey).(string)
 
-	err = store.UpdateProcess(ctx, obj, agentName, mask)
+	err = store.UpdateProcess(ctx, obj, agentName, util.CombineBitMasks(masks...))
 	if err == nil {
 		p.commitStash()
 	}

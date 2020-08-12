@@ -176,7 +176,7 @@ func (e *Executor) dealPending(ctx context.Context, f *RtProcess) error {
 	f.setStatus(StatusRunning)
 	//our fsm principle: next STATUS(here is Running) must be saved in persistent storage
 	//before running the function of the next STATUS
-	err := f.persist(ctx, e.store, util.ProcessUpdateDefault)
+	err := f.persist(ctx, e.store)
 	return err
 }
 
@@ -256,19 +256,19 @@ func (e *Executor) dealRunning(ctx context.Context, p *RtProcess) error {
 
 	if tes.HasError() {
 		if tes.HasInternalErrorOnly() {
-			//TODO only retry on corresponding task
 			return tes.GetErrors()
 		}
 
-		e.lgr.Error("run process got error", zap.Error(tes.GetErrors()))
+		e.lgr.WithOptions(zap.AddStacktrace(zap.ErrorLevel)).Error("run process got error", zap.Error(tes.GetErrors()))
+
 		p.setStatus(StatusFailure)
-		err := p.persist(ctx, e.store, util.ProcessUpdateDefault)
+		err := p.persist(ctx, e.store)
 		if err != nil {
 			e.lgr.Debug("update process to status failed", zap.Int("status", int(StatusFailure)), zap.Error(err))
 		}
 	} else {
 		p.setStatus(StatusSuccess)
-		err := p.persist(ctx, e.store, util.ProcessUpdateDefault)
+		err := p.persist(ctx, e.store)
 		if err != nil {
 			e.lgr.Debug("failed to update process status", zap.Int("status", int(StatusSuccess)), zap.Error(err))
 		}
