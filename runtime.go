@@ -188,10 +188,25 @@ func WithDB(db *sql.DB) Option {
 	}
 }
 
-//TODO
-type Event int
+type Event interface {
+	Payload() interface{}
+}
 
-const EventComplete Event = 1
+//Runtime.onProcessComplete
+type CompletionEvent struct {
+}
+
+//Runtime.onProcessInternalRetry
+type InternalRetryEvent struct {
+}
+
+type ResumeEvent struct {
+	meta *ProcessMeta
+}
+
+func (e ResumeEvent) Payload() interface{} {
+	return e.meta
+}
 
 type Runtime struct {
 	ctx              context.Context
@@ -259,8 +274,6 @@ func (rt *Runtime) Submit(
 	class ProcessClass,
 	jsonSerializableData interface{},
 ) (string, error) {
-	//TODO check jsonSerializableData is Storage Type
-
 	data, err := json.Marshal(jsonSerializableData)
 	if err != nil {
 		return "", err
@@ -290,17 +303,12 @@ func (rt *Runtime) Resume(ctx context.Context, uuid string) error {
 		return errors.New("process instance not found: " + uuid)
 	}
 
-	meta := &ProcessMeta{
-		id:    processData.ID,
-		uuid:  processData.Uuid,
-		rerun: true,
-		//User:  processData.User,
-		//class: ClassFromRaw(processData.Class),
+	id, err := rt.store.CreateRerunProcessMeta(ctx, processData.User, processData.Class, processData.Uuid)
+	if err == nil {
+		rt.lg.Info("process rerun submitted",
+			zap.String("uuid", processData.Uuid), zap.Int64("ID", id))
 	}
-
-	rt.dispatch(ctx, []*ProcessMeta{meta})
-
-	return nil
+	return err
 }
 
 func (rt *Runtime) GetProcess(ctx context.Context, uuid string) (*Process, error) {
@@ -351,6 +359,8 @@ func (rt *Runtime) iterate(ctx context.Context) error {
 	defer ticker.Stop()
 	for {
 		select {
+		case <-ctx.Done():
+			return nil
 		case <-ticker.C:
 			metas, err := rt.fetchAllFlyingProcesses(ctx)
 			if err != nil {
@@ -360,14 +370,13 @@ func (rt *Runtime) iterate(ctx context.Context) error {
 				rt.errorCount = 0
 				rt.dispatch(ctx, metas)
 			}
-		case <-ctx.Done():
-			return nil
 		case event := <-rt.eventChan:
-			if event == EventComplete {
-				//TODO
-			}
+			rt.dealEvent(event)
 		}
 	}
+}
+
+func (rt *Runtime) dealEvent(event Event) {
 }
 
 func (rt *Runtime) onLockAgentError(reason error) {
@@ -401,7 +410,6 @@ func (rt *Runtime) onLockAgentError(reason error) {
 }
 
 func (rt *Runtime) onProcessComplete(item interface{}) {
-	//TODO send to eventChan and process by dispatch routine
 	meta := item.(*ProcessMeta)
 	key := rt.getQueueName(meta)
 	rt.shapingManager.Commit(key, meta)
@@ -411,6 +419,10 @@ func (rt *Runtime) onProcessComplete(item interface{}) {
 		rt.lg.Error("delete process meta failed", zap.Error(err))
 	}
 	rt.forward()
+
+	////TODO send to eventChan and process by dispatch routine
+	//event := &CompletionEvent{}
+	//rt.eventChan <- event
 }
 
 func (rt *Runtime) onProcessInternalRetry(item interface{}) {

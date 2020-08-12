@@ -15,12 +15,13 @@ CREATE TABLE process_meta
     `user`         CHAR(32)   NOT NULL DEFAULT '',
     `class`        CHAR(32)   NOT NULL DEFAULT '',
     `data`         TEXT       NOT NULL,
+    `rerun`        TINYINT(1) NOT NULL DEFAULT 0,
     `created_at`   TIMESTAMP  NOT NULL DEFAULT NOW(),
     `deleted_at`   TIMESTAMP           DEFAULT NULL,
     `deleted_flag` BIGINT(11) NOT NULL DEFAULT 0, -- TODO not implement
     PRIMARY KEY (`id`),
     KEY `idx_user_class_queue` (`user`, `class`),
-    UNIQUE KEY `idx_flow_meta_uuid` (`uuid`)
+    UNIQUE KEY `idx_flow_meta_uuid` (`uuid`, `rerun`)
 )
     AUTO_INCREMENT = 1
     DEFAULT CHARSET = utf8mb4;

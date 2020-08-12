@@ -209,7 +209,7 @@ func (ms *mysqlStore) CreateProcessMeta(ctx context.Context, meta *database.Proc
 	}
 	defer tx.Rollback()
 
-	insertSql := "INSERT INTO process_meta (uuid, user, class, data) VALUES (?, ?, ?, ?)"
+	insertSql := "INSERT INTO process_meta (uuid, `user`, class, `data`) VALUES (?, ?, ?, ?)"
 
 	result, err := tx.ExecContext(ctx, insertSql, meta.UUID, meta.User, meta.Class, meta.Data)
 	if err != nil {
@@ -226,6 +226,30 @@ func (ms *mysqlStore) CreateProcessMeta(ctx context.Context, meta *database.Proc
 	}
 	meta.ID = insertId
 	return nil
+}
+
+func (ms *mysqlStore) CreateRerunProcessMeta(ctx context.Context, user, class, uuid string) (int64, error) {
+	tx, err := ms.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	insertSql := "INSERT INTO process_meta (uuid, `user`, class, rerun, `data`) VALUES (?, ?, ?, 1, '')"
+
+	result, err := tx.ExecContext(ctx, insertSql, uuid, user, class)
+	if err != nil {
+		return 0, err
+	}
+	insertId, err := result.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	err = tx.Commit()
+	if err != nil {
+		return 0, err
+	}
+	return insertId, nil
 }
 
 func (ms *mysqlStore) DeleteProcessMeta(ctx context.Context, uuid string) error {

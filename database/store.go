@@ -44,6 +44,7 @@ type TaskDataObject struct {
 type RuntimeStore interface {
 	LoadUncommittedMeta(context.Context) ([]*ProcessMetaObject, error)
 	CreateProcessMeta(ctx context.Context, meta *ProcessMetaObject) error
+	CreateRerunProcessMeta(ctx context.Context, user, class, uuid string) (int64, error)
 	DeleteProcessMeta(ctx context.Context, uuid string) error
 	GetInstance(ctx context.Context, uuid string) (*ProcessDataObject, error)
 	GetOrCreateInstance(context.Context, ProcessDataPartial) (ProcessDataObject, error)

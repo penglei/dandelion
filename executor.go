@@ -180,10 +180,6 @@ func (e *Executor) dealPending(ctx context.Context, f *RtProcess) error {
 	return err
 }
 
-func (e Executor) dealBlocking(ctx context.Context, f *RtProcess) error {
-	return nil
-}
-
 func (e *Executor) restoreTasks(ctx context.Context, p *RtProcess, tasks []*RtTask) error {
 
 	taskDataPtrs, err := e.store.LoadTasks(ctx, p.id)
@@ -216,13 +212,12 @@ func (e *Executor) dealRunning(ctx context.Context, p *RtProcess) error {
 	}
 
 	var tes *taskErrorSanitation
-	for {
+	for { // step
 		partialTasks := p.orchestration.Next()
 		if partialTasks == nil {
 			break
 		}
 
-		//taskRun can update these tasks by pointer
 		p.updateSpawnedTasks(partialTasks)
 
 		if err := e.restoreTasks(ctx, p, partialTasks); err != nil {
@@ -233,7 +228,7 @@ func (e *Executor) dealRunning(ctx context.Context, p *RtProcess) error {
 
 		wg := &sync.WaitGroup{}
 		wg.Add(len(partialTasks))
-		for _, task := range partialTasks {
+		for _, task := range partialTasks { //run tasks in parallel
 			e.lgr.Info("run task",
 				zap.String("instance", p.uuid),
 				zap.Any("process", p.scheme.Name),
@@ -327,9 +322,6 @@ func (e *Executor) spawn(ctx context.Context, p *RtProcess) {
 					zap.Error(err),
 				)
 
-				//if errors.Is(err, HaltingError) {
-				//}
-
 				e.notifier.TriggerInternalRetry(ctx.Value(contextMetaKey))
 				return
 			}
@@ -345,7 +337,7 @@ func (e *Executor) spawn(ctx context.Context, p *RtProcess) {
 	}
 }
 
-func (e *Executor) do(ctx context.Context, meta *ProcessMeta) {
+func (e *Executor) run(ctx context.Context, meta *ProcessMeta) {
 	ctx = context.WithValue(ctx, contextMetaKey, meta)
 
 	e.lgr.Debug("run process", zap.String("id", meta.uuid), zap.String("name", meta.class.Raw()))
@@ -371,10 +363,6 @@ func (e *Executor) do(ctx context.Context, meta *ProcessMeta) {
 	e.spawn(ctx, p)
 }
 
-func (e *Executor) resume(ctx context.Context, uuid string) {
-
-}
-
 func (e *Executor) Bootstrap(ctx context.Context, metaChan <-chan *ProcessMeta) {
 	ctx = context.WithValue(ctx, contextAgentNameKey, e.name)
 	for {
@@ -382,13 +370,9 @@ func (e *Executor) Bootstrap(ctx context.Context, metaChan <-chan *ProcessMeta) 
 		case <-ctx.Done():
 			return
 		case meta := <-metaChan:
-			go e.do(ctx, meta)
+			go e.run(ctx, meta)
 		}
 	}
-}
-
-func (e *Executor) Terminate() {
-	panic("not implement!")
 }
 
 func NewExecutor(name string, notifyAgent *Notifier, store RuntimeStore, lg *zap.Logger) *Executor {

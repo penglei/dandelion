@@ -94,7 +94,7 @@ func (p *RtProcess) persist(ctx context.Context, store RuntimeStore, masks ...ut
 		p.commitStash()
 	}
 
-	//maybe reload from store?
+	//maybe reload RtProcess' state from store?
 
 	return err
 }
