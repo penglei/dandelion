@@ -12,7 +12,42 @@ import (
 	"net/http"
 	_ "net/http/pprof"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 )
+
+var shutdownSignals = []os.Signal{os.Interrupt, syscall.SIGTERM}
+var onlyOneSignalHandler = make(chan struct{})
+
+// SetupSignalHandler registered for SIGTERM and SIGINT. A stop channel is returned
+// which is closed on one of these signals. If a second signal is caught, the program
+// is terminated with exit code 1.
+func SetupSignalHandler() (stopCh <-chan struct{}) {
+	close(onlyOneSignalHandler) // panics when called twice
+
+	stop := make(chan struct{})
+	c := make(chan os.Signal, 2)
+	signal.Notify(c, shutdownSignals...)
+	go func() {
+		<-c
+		close(stop)
+		<-c
+		time.Sleep(5 * time.Second)
+		os.Exit(1) // second signal. Exit directly.
+	}()
+
+	return stop
+}
+
+func gracefulShutdownContext(stopCh <-chan struct{}) context.Context {
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		<-stopCh
+		cancel()
+	}()
+	return ctx
+}
 
 type MySQLOptions struct {
 	Host     string
@@ -35,7 +70,7 @@ func main() {
 		Port:     3306,
 		Username: "root",
 		Password: "",
-		Name:     "dandelion",
+		Name:     "tke_mesh_trial",
 	}
 	userInfo := m.Username
 	//var dsn = fmt.Sprintf("%s@tcp(%s:%d)/%s?charset=%s&parseTime=True&loc=UTC&time_zone=%s", userInfo, m.Host, m.Port, m.Name, m.Charset, url.QueryEscape(`"+00:00"`))
@@ -59,11 +94,10 @@ func main() {
 	l, err := conf.Build()
 	zap.ReplaceGlobals(l)
 
-	ctx := context.Background()
-	//ctx, cancelFn := context.WithCancel(ctx)
-
 	switch role {
 	case RoleProducer:
+		ctx := context.Background()
+		//ctx, cancelFn := context.WithCancel(ctx)
 		user := "user_default"
 		if len(os.Args) >= 3 {
 			user = os.Args[2]
@@ -79,6 +113,9 @@ func main() {
 			panic(err)
 		}
 	case RoleConsumer:
+		stopCh := SetupSignalHandler()
+		ctx := gracefulShutdownContext(stopCh)
+
 		go func() {
 			log.Println(http.ListenAndServe("localhost:6060", nil))
 		}()
@@ -93,12 +130,9 @@ func main() {
 		if err != nil {
 			panic(err)
 		}
-		stopCh := make(chan struct{})
 		<-stopCh
 		//cancelFn()
-
 	}
-
 }
 
 func init() {
@@ -138,6 +172,7 @@ func registerMeshInstallJob(job *meshInstalling) {
 
 	installMeshProcess := &dandelion.ProcessScheme{
 		Name:          TestInstall,
+		Retryable:     true,
 		NewStorage:    func() interface{} { return &InstallingStorage{} },
 		Orchestration: dandelion.NewChain([]TaskScheme{t1, t2}),
 		OnFailure: func(ctx dandelion.Context) {
@@ -194,6 +229,7 @@ func (mj *meshInstalling) SecondTask(ctx Context) error {
 	storage := ctx.Global().(*InstallingStorage)
 	log.Printf("SecondTask running, storage: %v, data: %v\n", storage, mj.Data)
 	mj.K8sSvc.GetCluster(storage.MeshName)
+	time.Sleep(30 * time.Second)
 	//return fmt.Errorf("custom error in second")
 	return nil
 }

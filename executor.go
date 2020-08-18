@@ -111,7 +111,7 @@ func (e *Executor) dealTaskRunning(ctx context.Context, p *RtProcess, t *RtTask)
 
 		if taskError != nil {
 			t.setStatus(StatusFailure)
-			t.setError(taskError)
+			t.setError(Error{err: taskError})
 			if err := t.persistTask(ctx, e.store, p.id, util.TaskSetError|util.TaskSetFinishStat); err != nil {
 				e.lgr.Debug("task execution failed, and status save failed",
 					zap.Error(taskError),
@@ -136,7 +136,7 @@ func (e *Executor) dealTaskRunning(ctx context.Context, p *RtProcess, t *RtTask)
 		//{
 		err := fmt.Errorf("task(%s, %s) failed unexpectedly, maybe task status saved failed", p.uuid, t.name)
 		t.setStatus(StatusFailure)
-		t.setError(err)
+		t.setError(Error{err: err})
 		if err := t.persistTask(ctx, e.store, p.id, util.TaskSetError|util.TaskSetFinishStat); err != nil {
 			e.lgr.Error("task failure status didn't save",
 				zap.String("id", p.uuid),
@@ -147,9 +147,9 @@ func (e *Executor) dealTaskRunning(ctx context.Context, p *RtProcess, t *RtTask)
 	}
 }
 
-func (e *Executor) runTask(ctx context.Context, p *RtProcess, t *RtTask) error {
-
+func (e *Executor) runTask(ctx context.Context, p *RtProcess, t *RtTask, lgr *zap.Logger) error {
 	var advanceToRunning = func() error {
+		t.setHasNotBeenExecuted()
 		t.setStatus(StatusRunning)
 		err := t.persistTask(ctx, e.store, p.id, util.TaskUpdateDefault)
 		if err != nil {
@@ -158,13 +158,8 @@ func (e *Executor) runTask(ctx context.Context, p *RtProcess, t *RtTask) error {
 		return nil
 	}
 
-	if t.status == StatusFailure {
-		e.lgr.Info("recover task running",
-			zap.Any("class", p.scheme.Name),
-			zap.String("process", p.uuid),
-			zap.String("name", t.name),
-		)
-		t.executed = false
+	if t.status == StatusFailure || t.status == StatusPausing || t.status == StatusRunning {
+		lgr.Info("recover task running", zap.String("status", t.status.String()))
 		//recover running
 		if err := advanceToRunning(); err != nil {
 			return err
@@ -178,13 +173,16 @@ func (e *Executor) runTask(ctx context.Context, p *RtProcess, t *RtTask) error {
 				return err
 			}
 		case StatusRunning:
+			lgr.Info("task is running")
 			err := e.dealTaskRunning(ctx, p, t)
 			if err != nil {
 				return err
 			}
 		case StatusFailure:
+			lgr.Info("task is in failure status, waiting user to resume the process")
 			return nil
 		case StatusSuccess:
+			lgr.Info("task has been executed successfully")
 			return nil
 		}
 	}
@@ -214,7 +212,7 @@ func (e *Executor) restoreTasks(ctx context.Context, p *RtProcess, tasks []*RtTa
 
 	for _, t := range tasks {
 		if data, ok := namedCache[t.name]; ok {
-			t.executed = data.Executed
+			t.executed = data.Executed //restore from persistent
 		}
 	}
 	return nil
@@ -228,7 +226,7 @@ func (e *Executor) dealRunning(ctx context.Context, p *RtProcess) error {
 		return err
 	}
 
-	var tes *taskErrorSanitation
+	var tes *taskErrorSanitation = newTaskErrorsSanitation()
 	for { // step
 		partialTasks := p.orchestration.Next()
 		if partialTasks == nil {
@@ -241,25 +239,32 @@ func (e *Executor) dealRunning(ctx context.Context, p *RtProcess) error {
 			return err
 		}
 
-		tes = newTaskErrorsSanitation()
-
 		wg := &sync.WaitGroup{}
 		wg.Add(len(partialTasks))
 		for _, task := range partialTasks { //run tasks in parallel
-			e.lgr.Info("run task",
-				zap.String("instance", p.uuid),
-				zap.Any("process", p.scheme.Name),
-				zap.String("task", task.name),
+			lgr := e.lgr.With(
+				zap.Any("class", p.scheme.Name),
+				zap.String("process", p.uuid),
+				zap.String("name", task.name),
 			)
 			go func(t *RtTask) {
 				defer wg.Done()
-				taskRunErr := e.runTask(ctx, p, t)
+				taskRunErr := e.runTask(ctx, p, t, lgr)
 				if taskRunErr != nil {
 					tes.AddError(p.uuid+":"+t.name, taskRunErr)
 				}
 			}(task)
 		}
 		wg.Wait()
+
+		err := p.persist(ctx, e.store)
+		if err != nil {
+			e.lgr.Error("persistent process state failed!",
+				zap.Any("class", p.scheme.Name),
+				zap.String("process", p.uuid),
+			)
+			return err
+		}
 
 		if tes.HasError() {
 			break
@@ -367,7 +372,7 @@ func (e *Executor) run(ctx context.Context, meta *ProcessMeta) {
 
 	e.lgr.Debug("run process", zap.String("id", meta.uuid), zap.String("name", meta.class.Raw()))
 
-	data, err := newPendingProcessData(meta.uuid, meta.User, meta.class, meta.data)
+	data, err := newPendingProcessData(meta.uuid, meta.user, meta.class, meta.data)
 	if err != nil {
 		e.lgr.Warn("new pending process error", zap.String("id", meta.uuid), zap.Error(err))
 		return

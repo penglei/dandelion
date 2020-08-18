@@ -108,6 +108,16 @@ type Process struct {
 	storage []byte
 }
 
+//export
+type Task struct {
+	Name      string
+	Status    string
+	ErrorCode string
+	ErrorMsg  string
+	StartedAt *time.Time
+	EndedAt   *time.Time
+}
+
 func (p *Process) UnmarshalState(state interface{}) error {
 	return deserializeStorage(p.storage, state)
 }
@@ -326,6 +336,7 @@ func (rt *Runtime) GetProcess(ctx context.Context, uuid string) (*Process, error
 		Status:  StatusFromRaw(processData.Status),
 		storage: processData.Storage,
 	}
+
 	/*
 		scheme, err := Resolve(ClassFromRaw(processObj.Class))
 		if err != nil {
@@ -333,6 +344,26 @@ func (rt *Runtime) GetProcess(ctx context.Context, uuid string) (*Process, error
 		}
 	*/
 	return p, nil
+}
+
+func (rt *Runtime) GetProcessTasks(ctx context.Context, uuid string) ([]*Task, error) {
+	taskDataObjects, err := rt.store.GetProcessTasks(ctx, uuid)
+	if err != nil {
+		return nil, err
+	}
+
+	tasks := make([]*Task, 0)
+	for _, item := range taskDataObjects {
+		tasks = append(tasks, &Task{
+			Name:      item.Name,
+			Status:    StatusFromRaw(item.Status).String(),
+			ErrorCode: item.ErrorCode,
+			ErrorMsg:  item.ErrorMsg,
+			StartedAt: item.StartedAt,
+			EndedAt:   item.EndedAt,
+		})
+	}
+	return tasks, nil
 }
 
 func (rt *Runtime) fetchAllFlyingProcesses(ctx context.Context) ([]*ProcessMeta, error) {
@@ -346,7 +377,7 @@ func (rt *Runtime) fetchAllFlyingProcesses(ctx context.Context) ([]*ProcessMeta,
 		metas = append(metas, &ProcessMeta{
 			id:    obj.ID,
 			uuid:  obj.UUID,
-			User:  obj.User,
+			user:  obj.User,
 			class: ClassFromRaw(obj.Class),
 			data:  obj.Data,
 			rerun: obj.Rerun == 1,
@@ -474,7 +505,7 @@ func (rt *Runtime) dispatch(ctx context.Context, metas []*ProcessMeta) {
 }
 
 func (rt *Runtime) getQueueName(meta *ProcessMeta) string {
-	queueName := fmt.Sprintf("%s:%s:%s", rt.lockGranularity, meta.User, meta.class)
+	queueName := fmt.Sprintf("%s:%s:%s", rt.lockGranularity, meta.user, meta.class)
 	return queueName
 }
 
@@ -486,7 +517,11 @@ func (rt *Runtime) forward() {
 	for _, meta := range metas {
 		select {
 		case rt.metaChan <- meta:
-			rt.lg.Info("forward a process", zap.Any("meta", *meta))
+			rt.lg.Info("forward a process",
+				zap.Any("class", meta.class),
+				zap.String("user", meta.user),
+				zap.String("uuid", meta.uuid),
+				zap.Bool("rerun", meta.rerun))
 		case <-ctx.Done():
 			return
 		}

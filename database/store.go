@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/penglei/dandelion/util"
+	"time"
 )
 
 type TypeStatusRaw = int
@@ -36,10 +37,11 @@ type TaskDataObject struct {
 	ProcessID int64
 	Name      string
 	Status    TypeStatusRaw
+	ErrorCode string
 	ErrorMsg  string
 	Executed  bool
-	//StartedAt *time.Time
-	//EndedAt   *time.Time
+	StartedAt *time.Time
+	EndedAt   *time.Time
 }
 
 type RuntimeStore interface {
@@ -54,4 +56,5 @@ type RuntimeStore interface {
 	SaveProcessStorage(ctx context.Context, processId int64, data []byte) error
 	UpsertTask(ctx context.Context, taskData TaskDataObject, mask util.BitMask) error
 	LoadTasks(ctx context.Context, processId int64) ([]*TaskDataObject, error)
+	GetProcessTasks(ctx context.Context, uuid string) ([]*TaskDataObject, error)
 }

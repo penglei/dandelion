@@ -9,7 +9,7 @@ import (
 type ProcessMeta struct {
 	id    int64 //must be total order
 	uuid  string
-	User  string
+	user  string
 	class ProcessClass
 	data  []byte
 	rerun bool

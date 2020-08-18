@@ -13,7 +13,7 @@ type mysqlStore struct {
 }
 
 func (ms *mysqlStore) LoadUncommittedMeta(ctx context.Context) ([]*database.ProcessMetaObject, error) {
-	querySql := "SELECT `id`, `uuid`, `user`, `class`, `data`, `rerun` FROM process_meta WHERE `deleted_at` is NULL ORDER BY `id`"
+	querySql := "SELECT `id`, `uuid`, `user`, `class`, `data`, `rerun` FROM process_meta WHERE `deleted_flag` = 0 ORDER BY `id`"
 	rows, err := ms.db.QueryContext(ctx, querySql)
 	if err != nil {
 		return nil, err
@@ -172,7 +172,11 @@ func (ms *mysqlStore) UpsertTask(ctx context.Context, data database.TaskDataObje
 	sqlArgs := []interface{}{data.ProcessID, data.Name, data.Status}
 
 	if opts.Has(util.TaskSetError) {
-		insertFieldsSql += ", `error`"
+		insertFieldsSql += ", `err_code`"
+		insertFieldsSqlPlaceHolder += ", ?"
+		sqlArgs = append(sqlArgs, data.ErrorCode)
+
+		insertFieldsSql += ", `err_msg`"
 		insertFieldsSqlPlaceHolder += ", ?"
 		sqlArgs = append(sqlArgs, data.ErrorMsg)
 	}
@@ -187,8 +191,8 @@ func (ms *mysqlStore) UpsertTask(ctx context.Context, data database.TaskDataObje
 	}
 
 	if opts.Has(util.TaskSetError) {
-		updateFieldsSql += ", `error` = ?"
-		sqlArgs = append(sqlArgs, data.ErrorMsg)
+		updateFieldsSql += ", `err_msg` = ?, `err_code` = ?"
+		sqlArgs = append(sqlArgs, data.ErrorMsg, data.ErrorCode)
 	}
 
 	if opts.Has(util.TaskSetFinishStat) {
@@ -302,6 +306,26 @@ func (ms *mysqlStore) LoadTasks(ctx context.Context, id int64) ([]*database.Task
 			return nil, err
 		}
 		td.Executed = executed == 1
+		results = append(results, td)
+	}
+
+	return results, nil
+}
+
+func (ms *mysqlStore) GetProcessTasks(ctx context.Context, uuid string) ([]*database.TaskDataObject, error) {
+	querySql := "SELECT a.`name`, a.`status`, a.`err_code`, a.`err_msg`, a.`started_at`, a.`ended_at` FROM process_task as a LEFT JOIN process as b ON a.process_id = b.id WHERE uuid = ?"
+	rows, err := ms.db.QueryContext(ctx, querySql, uuid)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	results := make([]*database.TaskDataObject, 0)
+	for rows.Next() {
+		td := &database.TaskDataObject{}
+		if err := rows.Scan(&td.Name, &td.Status, &td.ErrorCode, &td.ErrorMsg, &td.StartedAt, &td.EndedAt); err != nil {
+			return nil, err
+		}
 		results = append(results, td)
 	}
 
