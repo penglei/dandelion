@@ -118,11 +118,15 @@ func TestRuntime(t *testing.T) {
 	snapshot := make(map[string]ProcessState)
 	err = json.Unmarshal(exporter.data, &snapshot)
 	assert.NilError(t, err)
-	savedProcessSnapshot := snapshot[processId]
-	fmt.Printf("%+v\n", savedProcessSnapshot.Storage)
+	fmt.Printf("%+v\n", snapshot[processId].Storage)
 
 	disableTestPanic = true
 
 	err = pm.Retry(ctx, processId, *testProcessScheme)
 	assert.NilError(t, err)
+
+
+	err = json.Unmarshal(exporter.data, &snapshot)
+	assert.NilError(t, err)
+	fmt.Printf("%+v\n", snapshot[processId].Storage)
 }

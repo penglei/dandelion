@@ -28,40 +28,19 @@ type processMachine struct {
 
 func (machine *processMachine) SaveTaskState(taskScheme scheme.TaskScheme, persistence fsm.Persistence) {
 	if !machine.state.IsCompensatingProgress {
-		//found := false
 		for i, item := range machine.state.Executions {
 			if item.Name == taskScheme.Name {
 				machine.state.Executions[i].FsmPersistence = persistence
-				//found = true
 				break
 			}
 		}
-		/*
-			if !found {
-				machine.state.Executions = append(machine.state.Executions, TaskState{
-					Name:           taskScheme.Name,
-					FsmPersistence: persistence,
-				})
-			}
-		*/
 	} else {
-		//found := false
 		for i, item := range machine.state.Compensations {
 			if item.Name == taskScheme.Name {
 				machine.state.Compensations[i].FsmPersistence = persistence
-				//found = true
 				break
 			}
 		}
-		/*
-			if !found {
-				machine.state.Compensations = append(machine.state.Compensations, TaskState{
-					Name:           taskScheme.Name,
-					FsmPersistence: persistence,
-				})
-			}
-
-		*/
 	}
 }
 

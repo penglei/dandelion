@@ -88,8 +88,8 @@ func NewTaskFSM(action IActionHandle, store fsm.IStore) *fsm.StateMachine {
 			Failed: State{
 				Action: ActionHandle(action.onFailed),
 				Events: Events{
-					//ForceDelete: ...,
 					Rollback: Compensating,
+					Retry:    Running,
 				},
 			},
 			Compensating: State{
@@ -151,8 +151,8 @@ func NewProcessFSM(controller IActionHandle, store fsm.IStore) *fsm.StateMachine
 			Failed: State{
 				Action: ActionHandle(controller.onFailed),
 				Events: Events{
-					//ForceDelete: ...,
 					Rollback: Compensating,
+					Retry:    Running,
 				},
 			},
 			Compensating: State{
