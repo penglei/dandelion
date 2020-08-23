@@ -28,8 +28,7 @@ const (
 
 //events
 const (
-	Run          EventType = "Run" //external
-	Iterate                = "Iterate"
+	Run          EventType = "Run"    //external
 	Resume                 = "Resume" //external *
 	WaitRetry              = "WaitRetry"
 	Retry                  = "Retry" //external
@@ -133,7 +132,7 @@ func NewProcessFSM(controller IActionHandle, store fsm.IStore) *fsm.StateMachine
 					Success:   Successful,
 					Fail:      Failed,
 					WaitRetry: Retryable,
-					Iterate:   Running,
+					Run:       Running,
 				},
 			},
 			Retryable: State{

@@ -135,7 +135,7 @@ func (s *StateMachine) SendEvent(event EventType, ctx context.Context) error {
 		persistence := Persistence{
 			Previous:  s.Previous,
 			Current:   s.Current,
-			NextEvent: event,
+			NextEvent: nextEvent,
 		}
 		if err = s.Store.Save(persistence); err != nil {
 			return err

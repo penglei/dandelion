@@ -12,10 +12,17 @@ type processController struct {
 func (p *processController) CurrentExecutionTask() *taskMachine {
 	executions := p.model.state.Executions
 
-	if len(executions) > 0 {
+	executionsCnt := len(executions)
+	tasksCnt := len(p.model.scheme.Tasks)
+
+	if executionsCnt > 0 {
 		taskState := &executions[len(executions)-1]
 		if taskState.FsmPersistence.Current == Successful {
-			return nil
+			if executionsCnt == tasksCnt {
+				return nil
+			} else {
+				//goto new
+			}
 		} else {
 			taskScheme := p.model.scheme.GetTask(taskState.Name)
 			lgr := p.model.lgr.With(zap.String("taskName", taskScheme.Name))
@@ -24,12 +31,18 @@ func (p *processController) CurrentExecutionTask() *taskMachine {
 			return taskInstance
 		}
 	} else {
-		nextTaskIndex := len(executions)
-		taskScheme := p.model.scheme.Tasks[nextTaskIndex]
-		lgr := p.model.lgr.With(zap.String("taskName", taskScheme.Name))
-		taskInstance := NewTaskMachine(taskScheme, p.model, lgr)
-		return taskInstance
+		//goto new
 	}
+
+	//new
+	nextTaskIndex := executionsCnt
+	taskScheme := p.model.scheme.Tasks[nextTaskIndex]
+	lgr := p.model.lgr.With(zap.String("taskName", taskScheme.Name))
+	taskInstance := NewTaskMachine(taskScheme, p.model, lgr)
+	p.model.state.Executions = append(p.model.state.Executions, TaskState{
+		Name: taskScheme.Name,
+	})
+	return taskInstance
 }
 
 func (p *processController) onInterrupted(eventCtx EventContext) EventType {
@@ -42,7 +55,7 @@ func (p *processController) onRunning(eventCtx EventContext) EventType {
 	taskInstance := p.CurrentExecutionTask()
 
 	if taskInstance == nil {
-		return Successful
+		return Success
 	}
 
 	var err error
@@ -66,7 +79,7 @@ func (p *processController) onRunning(eventCtx EventContext) EventType {
 
 	switch taskInstance.fsm.Current {
 	case Successful: //Next
-		return Iterate //taskInstance would update internal state
+		return Run //taskInstance would update internal state
 	case Retryable:
 		return WaitRetry
 	//case Interrupted:

@@ -6,47 +6,67 @@ import (
 	"github.com/penglei/dandelion/fsm"
 	"github.com/penglei/dandelion/scheme"
 	"go.uber.org/zap"
+	"sync"
 )
 
 var machineDuplicateError = errors.New("process has exist")
 
 type SnapshotExporter interface {
-	Write(uuid string, snapshot ProcessState) error
-	Read(uuid string) (*ProcessState, error)
+	Write(processId string, snapshot ProcessState) error
+	Read(processId string) (*ProcessState, error)
 }
 
 type processMachine struct {
-	uuid     string
+	id       string
 	scheme   scheme.ProcessScheme
 	lgr      *zap.Logger
-	fsm      *fsm.StateMachine
 	exporter SnapshotExporter
 	state    ProcessState
+	fsm      *fsm.StateMachine
 	initial  ProcessState
 }
 
 func (machine *processMachine) SaveTaskState(taskScheme scheme.TaskScheme, persistence fsm.Persistence) {
 	if !machine.state.IsCompensatingProgress {
+		//found := false
 		for i, item := range machine.state.Executions {
 			if item.Name == taskScheme.Name {
 				machine.state.Executions[i].FsmPersistence = persistence
+				//found = true
 				break
 			}
 		}
+		/*
+			if !found {
+				machine.state.Executions = append(machine.state.Executions, TaskState{
+					Name:           taskScheme.Name,
+					FsmPersistence: persistence,
+				})
+			}
+		*/
 	} else {
+		//found := false
 		for i, item := range machine.state.Compensations {
 			if item.Name == taskScheme.Name {
 				machine.state.Compensations[i].FsmPersistence = persistence
+				//found = true
 				break
 			}
 		}
+		/*
+			if !found {
+				machine.state.Compensations = append(machine.state.Compensations, TaskState{
+					Name:           taskScheme.Name,
+					FsmPersistence: persistence,
+				})
+			}
+
+		*/
 	}
 }
 
 func (machine *processMachine) Forward(ctx context.Context, event fsm.EventType) error {
-	//TODO run in gorouting
 	err := machine.fsm.SendEvent(event, ctx)
-	//TODO delete trigger
 	return err
 }
 
@@ -57,7 +77,7 @@ func (machine *processMachine) BringOut(storage interface{}) error {
 
 //init
 func (machine *processMachine) Restate() error {
-	snapshot, err := machine.exporter.Read(machine.uuid)
+	snapshot, err := machine.exporter.Read(machine.id)
 	if err != nil {
 		return err
 	}
@@ -69,30 +89,45 @@ func (machine *processMachine) Restate() error {
 
 func (machine *processMachine) Save(persistence fsm.Persistence) error {
 	machine.state.FsmPersistence = persistence
-	return machine.exporter.Write(machine.uuid, machine.state)
+	return machine.exporter.Write(machine.id, machine.state)
 }
 
 type processManager struct {
+	mutex           sync.Mutex
 	processMachines map[string]*processMachine
+	exporter        SnapshotExporter
+	lgr             *zap.Logger
 }
 
-func NewProcessManager() *processManager {
-	return &processManager{}
+func NewProcessManager(
+	exporter SnapshotExporter,
+	lgr *zap.Logger,
+) *processManager {
+	return &processManager{
+		processMachines: make(map[string]*processMachine, 0),
+		exporter:        exporter,
+		lgr:             lgr,
+	}
 }
 
 func (p *processManager) Create(
-	uuid string,
+	processId string,
 	scheme scheme.ProcessScheme,
 ) (*processMachine, error) {
-	instance, ok := p.processMachines[uuid]
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+
+	instance, ok := p.processMachines[processId]
 	if ok {
 		return nil, machineDuplicateError
 	}
 
 	instance = &processMachine{
-		uuid:   uuid,
-		scheme: scheme,
-		state:  NewProcessState(),
+		id:       processId,
+		scheme:   scheme,
+		lgr:      p.lgr,
+		exporter: p.exporter,
+		state:    NewProcessState(),
 	}
 
 	controller := NewProcessController(instance)
@@ -101,17 +136,17 @@ func (p *processManager) Create(
 	//cycle dependency
 	instance.fsm = processFsm
 
-	p.processMachines[uuid] = instance
+	p.processMachines[processId] = instance
 	return instance, nil
 }
 
 func (p *processManager) startNewProcess(
 	ctx context.Context,
-	uuid string,
+	processId string,
 	scheme scheme.ProcessScheme,
 	storage interface{},
 ) error {
-	instance, err := p.Create(uuid, scheme)
+	instance, err := p.Create(processId, scheme)
 	if err != nil {
 		return err
 	}
@@ -121,17 +156,18 @@ func (p *processManager) startNewProcess(
 	}
 
 	err = instance.Forward(ctx, Run)
+	delete(p.processMachines, processId)
 
 	return err
 }
 
 func (p *processManager) startSuspendProcess(
 	ctx context.Context,
-	uuid string,
+	processId string,
 	scheme scheme.ProcessScheme,
 	event fsm.EventType,
 ) error {
-	instance, err := p.Create(uuid, scheme)
+	instance, err := p.Create(processId, scheme)
 	if err != nil {
 		return err
 	}
@@ -141,15 +177,19 @@ func (p *processManager) startSuspendProcess(
 	}
 
 	err = instance.Forward(ctx, event)
+	delete(p.processMachines, processId)
+
 	return err
 }
 
 func (p *processManager) startAccidentStoppedProcess(
 	ctx context.Context,
-	uuid string,
+	processId string,
 	scheme scheme.ProcessScheme,
 ) error {
-	instance, err := p.Create(uuid, scheme)
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	instance, err := p.Create(processId, scheme)
 	if err != nil {
 		return err
 	}
@@ -165,43 +205,43 @@ func (p *processManager) startAccidentStoppedProcess(
 
 func (p *processManager) Recovery(
 	ctx context.Context,
-	uuid string,
+	processId string,
 	scheme scheme.ProcessScheme,
 ) error {
-	return p.startAccidentStoppedProcess(ctx, uuid, scheme)
+	return p.startAccidentStoppedProcess(ctx, processId, scheme)
 }
 
 func (p *processManager) Run(
 	ctx context.Context,
-	uuid string,
+	processId string,
 	scheme scheme.ProcessScheme,
 	storage interface{},
 ) error {
-	return p.startNewProcess(ctx, uuid, scheme, storage)
+	return p.startNewProcess(ctx, processId, scheme, storage)
 }
 
 func (p *processManager) Resume(
 	ctx context.Context,
-	uuid string,
+	processId string,
 	scheme scheme.ProcessScheme,
 ) error {
-	return p.startSuspendProcess(ctx, uuid, scheme, Resume)
+	return p.startSuspendProcess(ctx, processId, scheme, Resume)
 }
 
 func (p *processManager) Retry(
 	ctx context.Context,
-	uuid string,
+	processId string,
 	scheme scheme.ProcessScheme,
 ) error {
-	return p.startSuspendProcess(ctx, uuid, scheme, Retry)
+	return p.startSuspendProcess(ctx, processId, scheme, Retry)
 }
 
 func (p *processManager) Rollback(
 	ctx context.Context,
-	uuid string,
+	processId string,
 	scheme scheme.ProcessScheme,
 ) error {
-	return p.startSuspendProcess(ctx, uuid, scheme, Rollback)
+	return p.startSuspendProcess(ctx, processId, scheme, Rollback)
 }
 
 type taskMachine struct {
@@ -256,6 +296,6 @@ func NewTaskMachine(
 	controller := NewTaskController(taskInstance)
 	taskFsm := NewTaskFSM(controller, taskInstance)
 	taskInstance.fsm = taskFsm
-
+	//taskInstance.initial = TaskState{}
 	return taskInstance
 }

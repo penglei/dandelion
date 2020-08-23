@@ -24,7 +24,7 @@ func (t TaskFn) Execute(ctx Context) error {
 	return t(ctx)
 }
 
-func (t TaskFn) Compensate() error {
+func (t TaskFn) Compensate(ctx Context) error {
 	return nil
 }
 
@@ -75,21 +75,26 @@ func validateTaskSchemes(taskSchemes []TaskScheme) error {
 	return nil
 }
 
-func Register(f *ProcessScheme) {
-	var key = f.Name
-
+func Register(scheme *ProcessScheme) {
+	var key = scheme.Name
 	//TODO validate ProcessScheme.NewStorage return ptr
 	if _, ok := schemes[key]; ok {
 		panic(fmt.Sprintf("register process with key(%s) again", key))
 	}
 
-	namedTasks := make(map[string]TaskScheme, len(f.Tasks))
+	namedTasks := make(map[string]TaskScheme, len(scheme.Tasks))
 
-	for _, item := range f.Tasks {
+	if err := validateTaskSchemes(scheme.Tasks); err != nil {
+		panic(err)
+	}
+
+	for _, item := range scheme.Tasks {
 		namedTasks[item.Name] = item
 	}
 
-	f.namedTasks = namedTasks
+	scheme.namedTasks = namedTasks
+
+	schemes[scheme.Name] = scheme
 }
 
 type InvalidScheme struct {

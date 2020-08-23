@@ -51,12 +51,12 @@ func NewTaskController(machine *taskMachine) IActionHandle {
 	}
 }
 func (tc *taskController) Info() string {
-	return fmt.Sprintf("%s:%s", tc.model.parent.uuid, tc.model.scheme.Name)
+	return fmt.Sprintf("%s:%s", tc.model.parent.id, tc.model.scheme.Name)
 }
 
 func (tc *taskController) onRunning(eventCtx EventContext) EventType {
 	scheme := tc.model.scheme
-	processId := tc.model.parent.uuid
+	processId := tc.model.parent.id
 	processState := &tc.model.parent.state
 
 	taskInfo := tc.Info()
@@ -113,7 +113,7 @@ func (tc *taskController) onFailed(eventCtx EventContext) EventType {
 
 func (tc *taskController) onCompensating(eventCtx EventContext) EventType {
 	scheme := tc.model.scheme
-	processId := tc.model.parent.uuid
+	processId := tc.model.parent.id
 	processState := &tc.model.parent.state
 
 	taskInfo := tc.Info()
