@@ -38,7 +38,6 @@ type TaskOrchestration interface {
 }
 
 type TaskHandle interface {
-	// Predicate() bool
 	Execute(ctx Context) error
 	// Compensate() error
 }
@@ -49,12 +48,13 @@ func (t TaskFn) Execute(ctx Context) error {
 	return t(ctx)
 }
 
-func (t TaskFn) Predicate() bool {
-	return true
+func (t TaskFn) Compensate() error {
+	return nil
 }
 
 type TaskScheme struct {
 	Name string
+	// MaxRetryCount int
 	Task TaskHandle
 }
 

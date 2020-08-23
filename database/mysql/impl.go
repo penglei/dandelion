@@ -8,11 +8,11 @@ import (
 	"github.com/penglei/dandelion/util"
 )
 
-type mysqlStore struct {
+type mysqlDatabase struct {
 	db *sql.DB
 }
 
-func (ms *mysqlStore) LoadUncommittedMeta(ctx context.Context) ([]*database.ProcessMetaObject, error) {
+func (ms *mysqlDatabase) LoadUncommittedMeta(ctx context.Context) ([]*database.ProcessMetaObject, error) {
 	querySql := "SELECT `id`, `uuid`, `user`, `class`, `data`, `rerun` FROM process_meta WHERE `deleted_flag` = 0 ORDER BY `id`"
 	rows, err := ms.db.QueryContext(ctx, querySql)
 	if err != nil {
@@ -32,7 +32,7 @@ func (ms *mysqlStore) LoadUncommittedMeta(ctx context.Context) ([]*database.Proc
 	return results, nil
 }
 
-func (ms *mysqlStore) GetInstance(ctx context.Context, uuid string) (*database.ProcessDataObject, error) {
+func (ms *mysqlDatabase) GetInstance(ctx context.Context, uuid string) (*database.ProcessDataObject, error) {
 	tx, err := ms.db.Begin()
 	if err != nil {
 		return nil, err
@@ -60,7 +60,7 @@ func (ms *mysqlStore) GetInstance(ctx context.Context, uuid string) (*database.P
 
 }
 
-func (ms *mysqlStore) GetOrCreateInstance(ctx context.Context, data database.ProcessDataPartial) (obj database.ProcessDataObject, err error) {
+func (ms *mysqlDatabase) GetOrCreateInstance(ctx context.Context, data database.ProcessDataPartial) (obj database.ProcessDataObject, err error) {
 	tx, err := ms.db.Begin()
 	if err != nil {
 		return
@@ -94,7 +94,7 @@ func createPendingProcess(ctx context.Context, tx *sql.Tx, data *database.Proces
 	return result.LastInsertId()
 }
 
-func (ms *mysqlStore) CreatePendingInstance(
+func (ms *mysqlDatabase) CreatePendingInstance(
 	ctx context.Context,
 	data database.ProcessDataPartial,
 ) error {
@@ -110,7 +110,7 @@ func (ms *mysqlStore) CreatePendingInstance(
 	return tx.Commit()
 }
 
-func (ms *mysqlStore) UpdateProcess(ctx context.Context, obj database.ProcessDataObject, agentName string, mask util.BitMask) error {
+func (ms *mysqlDatabase) UpdateProcess(ctx context.Context, obj database.ProcessDataObject, agentName string, mask util.BitMask) error {
 	tx, err := ms.db.Begin()
 	if err != nil {
 		return err
@@ -143,7 +143,7 @@ func (ms *mysqlStore) UpdateProcess(ctx context.Context, obj database.ProcessDat
 	return tx.Commit()
 }
 
-func (ms *mysqlStore) SaveProcessStorage(ctx context.Context, id int64, data []byte) error {
+func (ms *mysqlDatabase) SaveProcessStorage(ctx context.Context, id int64, data []byte) error {
 	tx, err := ms.db.Begin()
 	if err != nil {
 		return err
@@ -159,7 +159,7 @@ func (ms *mysqlStore) SaveProcessStorage(ctx context.Context, id int64, data []b
 	return tx.Commit()
 }
 
-func (ms *mysqlStore) UpsertTask(ctx context.Context, data database.TaskDataObject, opts util.BitMask) error {
+func (ms *mysqlDatabase) UpsertTask(ctx context.Context, data database.TaskDataObject, opts util.BitMask) error {
 	tx, err := ms.db.Begin()
 	if err != nil {
 		return err
@@ -215,7 +215,7 @@ func (ms *mysqlStore) UpsertTask(ctx context.Context, data database.TaskDataObje
 	return tx.Commit()
 }
 
-func (ms *mysqlStore) CreateProcessMeta(ctx context.Context, meta *database.ProcessMetaObject) error {
+func (ms *mysqlDatabase) CreateProcessMeta(ctx context.Context, meta *database.ProcessMetaObject) error {
 	tx, err := ms.db.Begin()
 	if err != nil {
 		return err
@@ -241,7 +241,7 @@ func (ms *mysqlStore) CreateProcessMeta(ctx context.Context, meta *database.Proc
 	return nil
 }
 
-func (ms *mysqlStore) CreateRerunProcessMeta(ctx context.Context, user, class, uuid string) (int64, error) {
+func (ms *mysqlDatabase) CreateRerunProcessMeta(ctx context.Context, user, class, uuid string) (int64, error) {
 	tx, err := ms.db.Begin()
 	if err != nil {
 		return 0, err
@@ -265,7 +265,7 @@ func (ms *mysqlStore) CreateRerunProcessMeta(ctx context.Context, user, class, u
 	return insertId, nil
 }
 
-func (ms *mysqlStore) DeleteProcessMeta(ctx context.Context, uuid string) error {
+func (ms *mysqlDatabase) DeleteProcessMeta(ctx context.Context, uuid string) error {
 	tx, err := ms.db.Begin()
 	if err != nil {
 		return err
@@ -288,7 +288,7 @@ func (ms *mysqlStore) DeleteProcessMeta(ctx context.Context, uuid string) error 
 	return tx.Commit()
 }
 
-func (ms *mysqlStore) LoadTasks(ctx context.Context, id int64) ([]*database.TaskDataObject, error) {
+func (ms *mysqlDatabase) LoadTasks(ctx context.Context, id int64) ([]*database.TaskDataObject, error) {
 	querySql := "SELECT `name`, `status`, `executed` FROM process_task WHERE process_id = ?"
 	rows, err := ms.db.QueryContext(ctx, querySql, id)
 	if err != nil {
@@ -312,7 +312,7 @@ func (ms *mysqlStore) LoadTasks(ctx context.Context, id int64) ([]*database.Task
 	return results, nil
 }
 
-func (ms *mysqlStore) GetProcessTasks(ctx context.Context, uuid string) ([]*database.TaskDataObject, error) {
+func (ms *mysqlDatabase) GetProcessTasks(ctx context.Context, uuid string) ([]*database.TaskDataObject, error) {
 	querySql := "SELECT a.`name`, a.`status`, a.`err_code`, a.`err_msg`, a.`started_at`, a.`ended_at` FROM process_task as a LEFT JOIN process as b ON a.process_id = b.id WHERE uuid = ?"
 	rows, err := ms.db.QueryContext(ctx, querySql, uuid)
 	if err != nil {
@@ -332,9 +332,9 @@ func (ms *mysqlStore) GetProcessTasks(ctx context.Context, uuid string) ([]*data
 	return results, nil
 }
 
-var _ database.RuntimeStore = &mysqlStore{}
+var _ database.Database = &mysqlDatabase{}
 
-func BuildRuntimeStore(db *sql.DB) *mysqlStore {
-	store := &mysqlStore{db: db}
+func BuildDatabase(db *sql.DB) *mysqlDatabase {
+	store := &mysqlDatabase{db: db}
 	return store
 }

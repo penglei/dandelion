@@ -44,7 +44,7 @@ type TaskDataObject struct {
 	EndedAt   *time.Time
 }
 
-type RuntimeStore interface {
+type Database interface {
 	LoadUncommittedMeta(context.Context) ([]*ProcessMetaObject, error)
 	CreateProcessMeta(ctx context.Context, meta *ProcessMetaObject) error
 	CreateRerunProcessMeta(ctx context.Context, user, class, uuid string) (int64, error)

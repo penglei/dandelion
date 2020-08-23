@@ -17,7 +17,7 @@ type Context interface {
 type processContext struct {
 	base    context.Context
 	process *RtProcess
-	store   RuntimeStore
+	store   Database
 }
 
 func (ctx *processContext) Deadline() (deadline time.Time, ok bool) {
@@ -64,7 +64,7 @@ func (ctx *processContext) TxSave(cb func(interface{}) error) error {
 
 var _ Context = &processContext{}
 
-func NewProcessContext(ctx context.Context, store RuntimeStore, f *RtProcess) Context {
+func NewProcessContext(ctx context.Context, store Database, f *RtProcess) Context {
 	return &processContext{
 		base:    ctx,
 		process: f,

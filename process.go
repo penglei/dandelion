@@ -59,7 +59,7 @@ func (p *RtProcess) commitStash() {
 	p.runningCnt = stash.runningCnt
 }
 
-func (p *RtProcess) persist(ctx context.Context, store RuntimeStore, masks ...util.BitMask) error {
+func (p *RtProcess) persist(ctx context.Context, db Database, masks ...util.BitMask) error {
 	if len(masks) == 0 {
 		masks = append(masks, util.ProcessUpdateDefault)
 	}
@@ -85,17 +85,17 @@ func (p *RtProcess) persist(ctx context.Context, store RuntimeStore, masks ...ut
 	}
 	agentName := ctx.Value(contextAgentNameKey).(string)
 
-	err = store.UpdateProcess(ctx, obj, agentName, util.CombineBitMasks(masks...))
+	err = db.UpdateProcess(ctx, obj, agentName, util.CombineBitMasks(masks...))
 	if err == nil {
 		p.commitStash()
 	}
 
-	//maybe reload RtProcess' state from store?
+	//maybe reload RtProcess' state from database?
 
 	return err
 }
 
-func (p *RtProcess) persistStartRunningStat(ctx context.Context, store RuntimeStore) {
+func (p *RtProcess) persistStartRunningStat(ctx context.Context, db Database) {
 	mask := util.ProcessUpdateDefault
 	mask |= util.ProcessUpdateRunningCnt
 	if p.runningCnt == 0 { //first running
@@ -103,14 +103,14 @@ func (p *RtProcess) persistStartRunningStat(ctx context.Context, store RuntimeSt
 	}
 	p.stash.runningCnt += 1
 
-	if err := p.persist(ctx, store, mask); err != nil {
+	if err := p.persist(ctx, db, mask); err != nil {
 		//TODO logging
 		p.stash.runningCnt -= 1
 	}
 }
 
-func (p *RtProcess) persistEndRunningStat(ctx context.Context, store database.RuntimeStore) error {
-	err := p.persist(ctx, store, util.ProcessUpdateDefault|util.ProcessSetCompleteStat)
+func (p *RtProcess) persistEndRunningStat(ctx context.Context, db database.Database) error {
+	err := p.persist(ctx, db, util.ProcessUpdateDefault|util.ProcessSetCompleteStat)
 	return err
 }
 

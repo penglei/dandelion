@@ -125,7 +125,7 @@ func (p *Process) UnmarshalState(state interface{}) error {
 type RuntimeBuilder struct {
 	name      string
 	lg        *zap.Logger
-	db        *sql.DB
+	rawDb     *sql.DB
 	workerNum int
 }
 
@@ -139,7 +139,7 @@ func NewRuntimeBuilder(opts ...Option) *RuntimeBuilder {
 
 func (rb *RuntimeBuilder) Build() *Runtime {
 	laBuilder := func() (LockAgent, error) {
-		return mysql.BuildMySQLLockAgent(rb.db, rb.lg, rb.name, LockHeartbeat)
+		return mysql.BuildMySQLLockAgent(rb.rawDb, rb.lg, rb.name, LockHeartbeat)
 	}
 	la, err := laBuilder()
 	if err != nil {
@@ -148,12 +148,12 @@ func (rb *RuntimeBuilder) Build() *Runtime {
 	if rb.name == "" {
 		rb.name = "default"
 	}
-	store := mysql.BuildRuntimeStore(rb.db)
+	db := mysql.BuildDatabase(rb.rawDb)
 
 	return &Runtime{
 		lg:               rb.lg,
 		name:             rb.name,
-		store:            store,
+		db:               db,
 		lockGranularity:  QueueLockGranularity,
 		checkInterval:    PollInterval,
 		errorCount:       0,
@@ -194,7 +194,7 @@ func WithWorkerNum(n int) Option {
 
 func WithDB(db *sql.DB) Option {
 	return func(rb *RuntimeBuilder) {
-		rb.db = db
+		rb.rawDb = db
 	}
 }
 
@@ -222,7 +222,7 @@ type Runtime struct {
 	ctx              context.Context
 	lg               *zap.Logger
 	name             string //name(consumer or producer)
-	store            RuntimeStore
+	db               Database
 	lockGranularity  string
 	checkInterval    time.Duration
 	errorCount       int
@@ -268,7 +268,7 @@ func (rt *Runtime) Bootstrap(ctx context.Context) error {
 	notifyAgent.RegisterProcessInternalRetry(rt.onProcessInternalRetry)
 
 	for i := 0; i < rt.workerNum; i += 1 {
-		executor := NewExecutor(rt.name, notifyAgent, rt.store, rt.lg)
+		executor := NewExecutor(rt.name, notifyAgent, rt.db, rt.lg)
 		rt.executors = append(rt.executors, executor)
 		go func() {
 			executor.Bootstrap(ctx, rt.metaChan)
@@ -296,7 +296,7 @@ func (rt *Runtime) Submit(
 	}
 
 	//save it
-	err = rt.store.CreateProcessMeta(ctx, &dbMeta)
+	err = rt.db.CreateProcessMeta(ctx, &dbMeta)
 	if err != nil {
 		return "", err
 	}
@@ -305,7 +305,7 @@ func (rt *Runtime) Submit(
 }
 
 func (rt *Runtime) Resume(ctx context.Context, uuid string) error {
-	processData, err := rt.store.GetInstance(ctx, uuid)
+	processData, err := rt.db.GetInstance(ctx, uuid)
 	if err != nil {
 		return err
 	}
@@ -313,7 +313,7 @@ func (rt *Runtime) Resume(ctx context.Context, uuid string) error {
 		return errors.New("process instance not found: " + uuid)
 	}
 
-	id, err := rt.store.CreateRerunProcessMeta(ctx, processData.User, processData.Class, processData.Uuid)
+	id, err := rt.db.CreateRerunProcessMeta(ctx, processData.User, processData.Class, processData.Uuid)
 	if err == nil {
 		rt.lg.Info("process rerun submitted",
 			zap.String("uuid", processData.Uuid), zap.Int64("ID", id))
@@ -322,7 +322,7 @@ func (rt *Runtime) Resume(ctx context.Context, uuid string) error {
 }
 
 func (rt *Runtime) GetProcess(ctx context.Context, uuid string) (*Process, error) {
-	processData, err := rt.store.GetInstance(ctx, uuid)
+	processData, err := rt.db.GetInstance(ctx, uuid)
 	if err != nil {
 		return nil, err
 	}
@@ -347,7 +347,7 @@ func (rt *Runtime) GetProcess(ctx context.Context, uuid string) (*Process, error
 }
 
 func (rt *Runtime) GetProcessTasks(ctx context.Context, uuid string) ([]*Task, error) {
-	taskDataObjects, err := rt.store.GetProcessTasks(ctx, uuid)
+	taskDataObjects, err := rt.db.GetProcessTasks(ctx, uuid)
 	if err != nil {
 		return nil, err
 	}
@@ -367,7 +367,7 @@ func (rt *Runtime) GetProcessTasks(ctx context.Context, uuid string) ([]*Task, e
 }
 
 func (rt *Runtime) fetchAllFlyingProcesses(ctx context.Context) ([]*ProcessMeta, error) {
-	objects, err := rt.store.LoadUncommittedMeta(ctx)
+	objects, err := rt.db.LoadUncommittedMeta(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -446,7 +446,7 @@ func (rt *Runtime) onProcessComplete(item interface{}) {
 	key := rt.getQueueName(meta)
 	rt.shapingManager.Commit(key, meta)
 
-	err := rt.store.DeleteProcessMeta(rt.ctx, meta.uuid)
+	err := rt.db.DeleteProcessMeta(rt.ctx, meta.uuid)
 	if err != nil {
 		rt.lg.Error("delete process meta failed", zap.Error(err))
 	}

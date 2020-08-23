@@ -1,4 +1,6 @@
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
+github.com/RussellLuo/goodtimer v0.0.0-20180917083831-1a236cb98bf6 h1:B6BcEH+pNO8JvPEzwAsnfyovPBYz9rD4OpeHDEnxAqo=
+github.com/RussellLuo/goodtimer v0.0.0-20180917083831-1a236cb98bf6/go.mod h1:bS3pW9iBKaASp/pO0BuEcPCE4mIfsgCH7tj/YbNgVME=
 github.com/davecgh/go-spew v1.1.0 h1:ZDRjVQ15GmhC3fiQ8ni8+OwkZQO4DARzQgrnXU1Liz8=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=

@@ -3,6 +3,7 @@ module github.com/penglei/dandelion
 go 1.13
 
 require (
+	github.com/RussellLuo/goodtimer v0.0.0-20180917083831-1a236cb98bf6 // indirect
 	github.com/go-sql-driver/mysql v1.4.1
 	github.com/google/go-cmp v0.3.1 // indirect
 	github.com/pborman/uuid v1.2.0

@@ -47,7 +47,7 @@ func (t *RtTask) setHasNotBeenExecuted() {
 	t.executed = false
 }
 
-func (t *RtTask) persistTask(ctx context.Context, store RuntimeStore, processId int64, mask util.BitMask) error {
+func (t *RtTask) persistTask(ctx context.Context, db Database, processId int64, mask util.BitMask) error {
 	taskData := database.TaskDataObject{
 		ProcessID: processId,
 		Name:      t.name,
@@ -58,7 +58,7 @@ func (t *RtTask) persistTask(ctx context.Context, store RuntimeStore, processId 
 		taskData.ErrorMsg = t.err.Error()
 	}
 
-	return store.UpsertTask(ctx, taskData, mask)
+	return db.UpsertTask(ctx, taskData, mask)
 }
 
 func newTask(name string, status Status) *RtTask {

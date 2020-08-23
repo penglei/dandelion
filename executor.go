@@ -17,7 +17,7 @@ const (
 	contextAgentNameKey = "__agent_name__"
 )
 
-type RuntimeStore = database.RuntimeStore
+type Database = database.Database
 
 type taskErrorSanitation struct {
 	internalOnlyFlag *atomic.Bool
@@ -87,18 +87,18 @@ func (tes *taskErrorSanitation) AddError(taskName string, err error) {
 type Executor struct {
 	name     string
 	lgr      *zap.Logger
-	store    database.RuntimeStore
+	database database.Database
 	notifier *Notifier
 }
 
 func (e *Executor) dealTaskRunning(ctx context.Context, p *RtProcess, t *RtTask) error {
 	if !t.executed {
 		t.setHasBeenExecuted()
-		if err := t.persistTask(ctx, e.store, p.id, util.TaskSetExecuted); err != nil {
+		if err := t.persistTask(ctx, e.database, p.id, util.TaskSetExecuted); err != nil {
 			return internalError{err}
 		}
 
-		processContext := NewProcessContext(ctx, e.store, p)
+		processContext := NewProcessContext(ctx, e.database, p)
 		var taskError = func() (err error) {
 			defer func() {
 				if r := recover(); r != nil {
@@ -112,7 +112,7 @@ func (e *Executor) dealTaskRunning(ctx context.Context, p *RtProcess, t *RtTask)
 		if taskError != nil {
 			t.setStatus(StatusFailure)
 			t.setError(Error{err: taskError})
-			if err := t.persistTask(ctx, e.store, p.id, util.TaskSetError|util.TaskSetFinishStat); err != nil {
+			if err := t.persistTask(ctx, e.database, p.id, util.TaskSetError|util.TaskSetFinishStat); err != nil {
 				e.lgr.Debug("task execution failed, and status save failed",
 					zap.Error(taskError),
 					zap.String("id", p.uuid),
@@ -122,7 +122,7 @@ func (e *Executor) dealTaskRunning(ctx context.Context, p *RtProcess, t *RtTask)
 			return taskError
 		} else {
 			t.setStatus(StatusSuccess)
-			err := t.persistTask(ctx, e.store, p.id, util.TaskUpdateDefault|util.TaskSetFinishStat)
+			err := t.persistTask(ctx, e.database, p.id, util.TaskUpdateDefault|util.TaskSetFinishStat)
 			if err != nil {
 				e.lgr.Error("task execution successful, but status save failed",
 					zap.String("id", p.uuid),
@@ -137,7 +137,7 @@ func (e *Executor) dealTaskRunning(ctx context.Context, p *RtProcess, t *RtTask)
 		err := fmt.Errorf("task(%s, %s) failed unexpectedly, maybe task status saved failed", p.uuid, t.name)
 		t.setStatus(StatusFailure)
 		t.setError(Error{err: err})
-		if err := t.persistTask(ctx, e.store, p.id, util.TaskSetError|util.TaskSetFinishStat); err != nil {
+		if err := t.persistTask(ctx, e.database, p.id, util.TaskSetError|util.TaskSetFinishStat); err != nil {
 			e.lgr.Error("task failure status didn't save",
 				zap.String("id", p.uuid),
 				zap.String("task_name", t.name))
@@ -151,7 +151,7 @@ func (e *Executor) runTask(ctx context.Context, p *RtProcess, t *RtTask, lgr *za
 	var advanceToRunning = func() error {
 		t.setHasNotBeenExecuted()
 		t.setStatus(StatusRunning)
-		err := t.persistTask(ctx, e.store, p.id, util.TaskUpdateDefault)
+		err := t.persistTask(ctx, e.database, p.id, util.TaskUpdateDefault)
 		if err != nil {
 			return internalError{err}
 		}
@@ -194,13 +194,13 @@ func (e *Executor) dealPending(ctx context.Context, p *RtProcess) error {
 	p.setStatus(StatusRunning)
 	//our fsm principle: next STATUS(here is Running) must be saved in persistent storage
 	//before running the function of the next STATUS
-	err := p.persist(ctx, e.store)
+	err := p.persist(ctx, e.database)
 	return err
 }
 
 func (e *Executor) restoreTasks(ctx context.Context, p *RtProcess, tasks []*RtTask) error {
 
-	taskDataPtrs, err := e.store.LoadTasks(ctx, p.id)
+	taskDataPtrs, err := e.database.LoadTasks(ctx, p.id)
 	if err != nil {
 		return err
 	}
@@ -219,7 +219,7 @@ func (e *Executor) restoreTasks(ctx context.Context, p *RtProcess, tasks []*RtTa
 }
 
 func (e *Executor) dealRunning(ctx context.Context, p *RtProcess) error {
-	p.persistStartRunningStat(ctx, e.store)
+	p.persistStartRunningStat(ctx, e.database)
 
 	err := p.orchestration.Restore(p.planState, p.scheme.Retryable)
 	if err != nil {
@@ -257,7 +257,7 @@ func (e *Executor) dealRunning(ctx context.Context, p *RtProcess) error {
 		}
 		wg.Wait()
 
-		err := p.persist(ctx, e.store)
+		err := p.persist(ctx, e.database)
 		if err != nil {
 			e.lgr.Error("persistent process state failed!",
 				zap.Any("class", p.scheme.Name),
@@ -284,13 +284,13 @@ func (e *Executor) dealRunning(ctx context.Context, p *RtProcess) error {
 			p.setStatus(StatusFailure)
 		}
 
-		err := p.persist(ctx, e.store)
+		err := p.persist(ctx, e.database)
 		if err != nil {
 			e.lgr.Debug("update process to status failed", zap.Int("status", int(StatusFailure)), zap.Error(err))
 		}
 	} else {
 		p.setStatus(StatusSuccess)
-		err := p.persist(ctx, e.store)
+		err := p.persist(ctx, e.database)
 		if err != nil {
 			e.lgr.Debug("failed to update process status", zap.Int("status", int(StatusSuccess)), zap.Error(err))
 		}
@@ -299,7 +299,7 @@ func (e *Executor) dealRunning(ctx context.Context, p *RtProcess) error {
 }
 
 func (e *Executor) dealSuccess(ctx context.Context, p *RtProcess) {
-	processContext := NewProcessContext(ctx, e.store, p)
+	processContext := NewProcessContext(ctx, e.database, p)
 	if p.scheme.OnSuccess != nil {
 		p.scheme.OnSuccess(processContext)
 	}
@@ -308,7 +308,7 @@ func (e *Executor) dealSuccess(ctx context.Context, p *RtProcess) {
 }
 
 func (e *Executor) dealFailure(ctx context.Context, p *RtProcess) {
-	processContext := NewProcessContext(ctx, e.store, p)
+	processContext := NewProcessContext(ctx, e.database, p)
 	if p.scheme.OnFailure != nil {
 		p.scheme.OnFailure(processContext)
 	}
@@ -322,7 +322,7 @@ func (e *Executor) doCompleteStat(ctx context.Context, p *RtProcess) {
 		zap.String("id", p.uuid),
 		zap.String("status", p.status.String()))
 
-	err := p.persistEndRunningStat(ctx, e.store)
+	err := p.persistEndRunningStat(ctx, e.database)
 	if err != nil {
 		e.lgr.Error("save last stat error", zap.Error(err))
 	}
@@ -378,7 +378,7 @@ func (e *Executor) run(ctx context.Context, meta *ProcessMeta) {
 		return
 	}
 
-	obj, err := e.store.GetOrCreateInstance(ctx, *data)
+	obj, err := e.database.GetOrCreateInstance(ctx, *data)
 	if err != nil {
 		e.lgr.Warn("get or create process error", zap.String("id", meta.uuid), zap.Error(err))
 		return
@@ -392,7 +392,7 @@ func (e *Executor) run(ctx context.Context, meta *ProcessMeta) {
 
 	if meta.rerun {
 		p.setStatus(StatusRunning)
-		if err := p.persist(ctx, e.store); err != nil {
+		if err := p.persist(ctx, e.database); err != nil {
 			e.lgr.Warn("can't update process status, rerun the process failed", zap.String("id", meta.uuid), zap.Error(err))
 			return
 		}
@@ -413,11 +413,11 @@ func (e *Executor) Bootstrap(ctx context.Context, metaChan <-chan *ProcessMeta) 
 	}
 }
 
-func NewExecutor(name string, notifyAgent *Notifier, store RuntimeStore, lg *zap.Logger) *Executor {
+func NewExecutor(name string, notifyAgent *Notifier, db Database, lg *zap.Logger) *Executor {
 	return &Executor{
 		name:     name,
 		lgr:      lg,
-		store:    store,
+		database: db,
 		notifier: notifyAgent,
 	}
 }

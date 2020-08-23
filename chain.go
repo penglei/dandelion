@@ -16,9 +16,6 @@ func (c *Chain) Prepare(pstate *PlanState) {
 	c.nextIndex = 0
 }
 
-func (c *Chain) Snapshot() []*RtTask {
-	return c.spawnedTasks
-}
 
 func (c *Chain) Restore(pstate *PlanState, retryable bool) error {
 	spawnedSize := len(pstate.SpawnedTasks)
