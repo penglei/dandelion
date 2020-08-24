@@ -7,6 +7,7 @@ import (
 
 type processController struct {
 	model *processMachine
+	lgr   *zap.Logger
 }
 
 func (p *processController) CurrentExecutionTask() *taskMachine {
@@ -25,7 +26,7 @@ func (p *processController) CurrentExecutionTask() *taskMachine {
 			}
 		} else {
 			taskScheme := p.model.scheme.GetTask(taskState.Name)
-			lgr := p.model.lgr.With(zap.String("taskName", taskScheme.Name))
+			lgr := p.lgr.With(zap.String("taskName", taskScheme.Name))
 			taskInstance := NewTaskMachine(taskScheme, p.model, lgr)
 			taskInstance.Restate(*taskState)
 			return taskInstance
@@ -37,7 +38,7 @@ func (p *processController) CurrentExecutionTask() *taskMachine {
 	//new
 	nextTaskIndex := executionsCnt
 	taskScheme := p.model.scheme.Tasks[nextTaskIndex]
-	lgr := p.model.lgr.With(zap.String("taskName", taskScheme.Name))
+	lgr := p.lgr.With(zap.String("taskName", taskScheme.Name))
 	taskInstance := NewTaskMachine(taskScheme, p.model, lgr)
 	p.model.state.Executions = append(p.model.state.Executions, TaskState{
 		Name: taskScheme.Name,
@@ -45,11 +46,16 @@ func (p *processController) CurrentExecutionTask() *taskMachine {
 	return taskInstance
 }
 
+func (p *processController) CurrentCompensationTask() *taskMachine {
+	return nil
+}
+
 func (p *processController) onInterrupted(eventCtx EventContext) EventType {
 	return NoOp
 }
 
 func (p *processController) onRunning(eventCtx EventContext) EventType {
+	p.lgr.Info("process onRunning")
 	event := eventCtx.Event
 
 	taskInstance := p.CurrentExecutionTask()
@@ -74,6 +80,7 @@ func (p *processController) onRunning(eventCtx EventContext) EventType {
 		if err != fsm.ErrEventRejected {
 			panic("unrecognized error")
 		}
+		p.lgr.Warn("process occurs an error", zap.Error(err))
 		return Fail
 	}
 
@@ -100,20 +107,42 @@ func (p *processController) onEnd(eventCtx EventContext) EventType {
 }
 
 func (p *processController) onFailed(eventCtx EventContext) EventType {
+	p.lgr.Info("process onFailed")
+	return NoOp
+}
+
+func (p *processController) onSuccessful(eventCtx EventContext) EventType {
+	p.lgr.Info("process onSuccessful")
 	return NoOp
 }
 
 func (p *processController) onCompensating(eventCtx EventContext) EventType {
-	p.model.state.IsCompensatingProgress = true
-	return NoOp
+	/*
+		p.model.state.IsCompensatingProgress = true
+		event := eventCtx.Event
+
+		taskInstance := p.CurrentCompensationTask()
+
+		if taskInstance == nil {
+			return Success
+		}
+	*/
+	return Success
 }
 
 func (p *processController) onDirty(eventCtx EventContext) EventType {
 	return NoOp
 }
 
+func (p *processController) onReverted(eventCtx EventContext) EventType {
+	return NoOp
+}
+
 var _ IActionHandle = &processController{}
 
-func NewProcessController(machine *processMachine) IActionHandle {
-	return &processController{model: machine}
+func NewProcessController(machine *processMachine, lgr *zap.Logger) IActionHandle {
+	return &processController{
+		model: machine,
+		lgr:   lgr,
+	}
 }

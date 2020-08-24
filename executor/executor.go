@@ -2,14 +2,10 @@ package executor
 
 import (
 	"context"
-	"errors"
 	"github.com/penglei/dandelion/fsm"
 	"github.com/penglei/dandelion/scheme"
 	"go.uber.org/zap"
-	"sync"
 )
-
-var machineDuplicateError = errors.New("process has exist")
 
 type SnapshotExporter interface {
 	Write(processId string, snapshot ProcessState) error
@@ -19,7 +15,6 @@ type SnapshotExporter interface {
 type processMachine struct {
 	id       string
 	scheme   scheme.ProcessScheme
-	lgr      *zap.Logger
 	exporter SnapshotExporter
 	state    ProcessState
 	fsm      *fsm.StateMachine
@@ -71,160 +66,9 @@ func (machine *processMachine) Save(persistence fsm.Persistence) error {
 	return machine.exporter.Write(machine.id, machine.state)
 }
 
-type processManager struct {
-	mutex           sync.Mutex
-	processMachines map[string]*processMachine
-	exporter        SnapshotExporter
-	lgr             *zap.Logger
-}
-
-func NewProcessManager(
-	exporter SnapshotExporter,
-	lgr *zap.Logger,
-) *processManager {
-	return &processManager{
-		processMachines: make(map[string]*processMachine, 0),
-		exporter:        exporter,
-		lgr:             lgr,
-	}
-}
-
-func (p *processManager) Create(
-	processId string,
-	scheme scheme.ProcessScheme,
-) (*processMachine, error) {
-	p.mutex.Lock()
-	defer p.mutex.Unlock()
-
-	instance, ok := p.processMachines[processId]
-	if ok {
-		return nil, machineDuplicateError
-	}
-
-	instance = &processMachine{
-		id:       processId,
-		scheme:   scheme,
-		lgr:      p.lgr,
-		exporter: p.exporter,
-		state:    NewProcessState(),
-	}
-
-	controller := NewProcessController(instance)
-	processFsm := NewProcessFSM(controller, instance)
-
-	//cycle dependency
-	instance.fsm = processFsm
-
-	p.processMachines[processId] = instance
-	return instance, nil
-}
-
-func (p *processManager) startNewProcess(
-	ctx context.Context,
-	processId string,
-	scheme scheme.ProcessScheme,
-	storage interface{},
-) error {
-	instance, err := p.Create(processId, scheme)
-	if err != nil {
-		return err
-	}
-
-	if err := instance.BringOut(storage); err != nil {
-		return err
-	}
-
-	err = instance.Forward(ctx, Run)
-	delete(p.processMachines, processId)
-
-	return err
-}
-
-func (p *processManager) startSuspendProcess(
-	ctx context.Context,
-	processId string,
-	scheme scheme.ProcessScheme,
-	event fsm.EventType,
-) error {
-	instance, err := p.Create(processId, scheme)
-	if err != nil {
-		return err
-	}
-
-	if err := instance.Restate(); err != nil {
-		return err
-	}
-
-	err = instance.Forward(ctx, event)
-	delete(p.processMachines, processId)
-
-	return err
-}
-
-func (p *processManager) startAccidentStoppedProcess(
-	ctx context.Context,
-	processId string,
-	scheme scheme.ProcessScheme,
-) error {
-	p.mutex.Lock()
-	defer p.mutex.Unlock()
-	instance, err := p.Create(processId, scheme)
-	if err != nil {
-		return err
-	}
-	if err := instance.Restate(); err != nil {
-		return err
-	}
-
-	event := instance.state.FsmPersistence.NextEvent
-
-	err = instance.Forward(ctx, event)
-	return err
-}
-
-func (p *processManager) Recovery(
-	ctx context.Context,
-	processId string,
-	scheme scheme.ProcessScheme,
-) error {
-	return p.startAccidentStoppedProcess(ctx, processId, scheme)
-}
-
-func (p *processManager) Run(
-	ctx context.Context,
-	processId string,
-	scheme scheme.ProcessScheme,
-	storage interface{},
-) error {
-	return p.startNewProcess(ctx, processId, scheme, storage)
-}
-
-func (p *processManager) Resume(
-	ctx context.Context,
-	processId string,
-	scheme scheme.ProcessScheme,
-) error {
-	return p.startSuspendProcess(ctx, processId, scheme, Resume)
-}
-
-func (p *processManager) Retry(
-	ctx context.Context,
-	processId string,
-	scheme scheme.ProcessScheme,
-) error {
-	return p.startSuspendProcess(ctx, processId, scheme, Retry)
-}
-
-func (p *processManager) Rollback(
-	ctx context.Context,
-	processId string,
-	scheme scheme.ProcessScheme,
-) error {
-	return p.startSuspendProcess(ctx, processId, scheme, Rollback)
-}
+// task
 
 type taskMachine struct {
-	lgr     *zap.Logger
 	scheme  scheme.TaskScheme
 	fsm     *fsm.StateMachine
 	parent  *processMachine
@@ -270,9 +114,8 @@ func NewTaskMachine(
 	taskInstance := &taskMachine{
 		scheme: scheme,
 		parent: parent,
-		lgr:    lgr,
 	}
-	controller := NewTaskController(taskInstance)
+	controller := NewTaskController(taskInstance, lgr)
 	taskFsm := NewTaskFSM(controller, taskInstance)
 	taskInstance.fsm = taskFsm
 	//taskInstance.initial = TaskState{}

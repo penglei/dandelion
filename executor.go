@@ -2,450 +2,156 @@ package dandelion
 
 import (
 	"context"
-	"fmt"
+	"encoding/json"
+	"errors"
 	"github.com/penglei/dandelion/database"
-	"github.com/penglei/dandelion/util"
-	"go.uber.org/atomic"
+	"github.com/penglei/dandelion/executor"
+	"github.com/penglei/dandelion/scheme"
 	"go.uber.org/zap"
-	"runtime/debug"
-	"strings"
-	"sync"
 )
 
-const (
-	contextMetaKey      = "__meta__"
-	contextAgentNameKey = "__agent_name__"
-)
-
-type Database = database.Database
-
-type taskErrorSanitation struct {
-	internalOnlyFlag *atomic.Bool
-	flag             *atomic.Bool
-	errors           sync.Map
+type processMetadata struct {
+	User string
 }
 
-func newTaskErrorsSanitation() *taskErrorSanitation {
-	return &taskErrorSanitation{
-		internalOnlyFlag: atomic.NewBool(true),
-		flag:             atomic.NewBool(false),
-		errors:           sync.Map{},
-	}
-}
-
-type internalError struct {
-	err error
-}
-
-func (e internalError) Error() string {
-	return e.err.Error()
-}
-
-type multiError struct {
-	errors []error
-}
-
-func (e *multiError) AddError(err error) {
-	e.errors = append(e.errors, err)
-}
-
-func (e multiError) Error() string {
-	errMessages := make([]string, 0, len(e.errors))
-	for _, err := range e.errors {
-		errMessages = append(errMessages, err.Error())
-	}
-	return strings.Join(errMessages, "\n")
-}
-
-func (tes *taskErrorSanitation) HasError() bool {
-	return tes.flag.Load()
-}
-
-func (tes *taskErrorSanitation) GetErrors() error {
-	var multiErr multiError
-	tes.errors.Range(func(key, value interface{}) bool {
-		taskName := key.(string)
-		err := value.(error)
-		multiErr.AddError(fmt.Errorf("task(%s) occured an error:%v", taskName, err))
-		return true
-	})
-	return multiErr
-}
-
-func (tes *taskErrorSanitation) HasInternalErrorOnly() bool {
-	return tes.internalOnlyFlag.Load()
-}
-
-func (tes *taskErrorSanitation) AddError(taskName string, err error) {
-	tes.flag.Store(true)
-	if _, ok := err.(internalError); !ok {
-		tes.internalOnlyFlag.Store(false)
-	}
-	tes.errors.Store(taskName, err)
-}
-
-type Executor struct {
-	name     string
+type DatabaseExporter struct {
+	db       database.Database
+	scheme   *scheme.ProcessScheme
+	metadata processMetadata
 	lgr      *zap.Logger
-	database database.Database
-	notifier *Notifier
 }
 
-func (e *Executor) dealTaskRunning(ctx context.Context, p *RtProcess, t *RtTask) error {
-	if !t.executed {
-		t.setHasBeenExecuted()
-		if err := t.persistTask(ctx, e.database, p.id, util.TaskSetExecuted); err != nil {
-			return internalError{err}
-		}
+func (de *DatabaseExporter) Write(processId string, snapshot executor.ProcessState) error {
+	ctx := context.Background()
 
-		processContext := NewProcessContext(ctx, e.database, p)
-		var taskError = func() (err error) {
-			defer func() {
-				if r := recover(); r != nil {
-					err = fmt.Errorf("task(%s, %s) panic: %v\n%s", p.uuid, t.name, r, debug.Stack())
-				}
-			}()
+	storage := snapshot.Storage
+	snapshot.Storage = nil
 
-			return t.scheme.Task.Execute(processContext)
-		}()
-
-		if taskError != nil {
-			t.setStatus(StatusFailure)
-			t.setError(Error{err: taskError})
-			if err := t.persistTask(ctx, e.database, p.id, util.TaskSetError|util.TaskSetFinishStat); err != nil {
-				e.lgr.Debug("task execution failed, and status save failed",
-					zap.Error(taskError),
-					zap.String("id", p.uuid),
-					zap.String("task_name", t.name))
-			}
-
-			return taskError
-		} else {
-			t.setStatus(StatusSuccess)
-			err := t.persistTask(ctx, e.database, p.id, util.TaskUpdateDefault|util.TaskSetFinishStat)
-			if err != nil {
-				e.lgr.Error("task execution successful, but status save failed",
-					zap.String("id", p.uuid),
-					zap.String("task_name", t.name))
-				return nil
-			}
-			return nil
-		}
-	} else {
-		// This case is generally not present, and if it does, we can only assume that the task failed.
-		//{
-		err := fmt.Errorf("task(%s, %s) failed unexpectedly, maybe task status saved failed", p.uuid, t.name)
-		t.setStatus(StatusFailure)
-		t.setError(Error{err: err})
-		if err := t.persistTask(ctx, e.database, p.id, util.TaskSetError|util.TaskSetFinishStat); err != nil {
-			e.lgr.Error("task failure status didn't save",
-				zap.String("id", p.uuid),
-				zap.String("task_name", t.name))
-		}
-		//}
+	stateBytes, err := json.Marshal(snapshot)
+	if err != nil {
 		return err
 	}
-}
-
-func (e *Executor) runTask(ctx context.Context, p *RtProcess, t *RtTask, lgr *zap.Logger) error {
-	var advanceToRunning = func() error {
-		t.setHasNotBeenExecuted()
-		t.setStatus(StatusRunning)
-		err := t.persistTask(ctx, e.database, p.id, util.TaskUpdateDefault)
-		if err != nil {
-			return internalError{err}
-		}
-		return nil
+	storageBytes, err := json.Marshal(storage)
+	if err != nil {
+		return err
 	}
-
-	if t.status == StatusFailure || t.status == StatusPausing || t.status == StatusRunning {
-		lgr.Info("recover task running", zap.String("status", t.status.String()))
-		//recover running
-		if err := advanceToRunning(); err != nil {
-			return err
-		}
+	data := database.ProcessDataObject{
+		ProcessDataPartial: database.ProcessDataPartial{
+			Uuid:    processId,
+			User:    de.metadata.User,
+			Class:   de.scheme.Name.Raw(),
+			Status:  snapshot.FsmPersistence.Current.String(),
+			State:   stateBytes,
+			Storage: storageBytes,
+		},
 	}
+	err = de.db.UpsertProcess(ctx, data)
+	if err != nil {
 
-	for {
-		switch t.status {
-		case StatusPending:
-			if err := advanceToRunning(); err != nil {
-				return err
-			}
-		case StatusRunning:
-			lgr.Info("task is running")
-			err := e.dealTaskRunning(ctx, p, t)
-			if err != nil {
-				return err
-			}
-		case StatusFailure:
-			lgr.Info("task is in failure status, waiting user to resume the process")
-			return nil
-		case StatusSuccess:
-			lgr.Info("task has been executed successfully")
-			return nil
-		}
+		de.lgr.Debug("saved snapshot: " + string(stateBytes))
 	}
-}
-
-func (e *Executor) dealPending(ctx context.Context, p *RtProcess) error {
-	p.orchestration.Prepare(p.planState)
-
-	p.setStatus(StatusRunning)
-	//our fsm principle: next STATUS(here is Running) must be saved in persistent storage
-	//before running the function of the next STATUS
-	err := p.persist(ctx, e.database)
 	return err
 }
 
-func (e *Executor) restoreTasks(ctx context.Context, p *RtProcess, tasks []*RtTask) error {
-
-	taskDataPtrs, err := e.database.LoadTasks(ctx, p.id)
+func (de *DatabaseExporter) Read(processId string) (*executor.ProcessState, error) {
+	ctx := context.Background()
+	dbObject, err := de.db.GetInstance(ctx, processId)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	namedCache := make(map[string]*database.TaskDataObject)
-	for _, item := range taskDataPtrs {
-		namedCache[item.Name] = item
-	}
+	state := &executor.ProcessState{}
 
-	for _, t := range tasks {
-		if data, ok := namedCache[t.name]; ok {
-			t.executed = data.Executed //restore from persistent
-		}
-	}
-	return nil
-}
-
-func (e *Executor) dealRunning(ctx context.Context, p *RtProcess) error {
-	p.persistStartRunningStat(ctx, e.database)
-
-	err := p.orchestration.Restore(p.planState, p.scheme.Retryable)
+	err = json.Unmarshal(dbObject.State, state)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	var tes *taskErrorSanitation = newTaskErrorsSanitation()
-	for { // step
-		partialTasks := p.orchestration.Next()
-		if partialTasks == nil {
-			break
-		}
+	storage := de.scheme.NewStorage() // checking pointer?
 
-		p.updateSpawnedTasks(partialTasks)
-
-		if err := e.restoreTasks(ctx, p, partialTasks); err != nil {
-			return err
-		}
-
-		wg := &sync.WaitGroup{}
-		wg.Add(len(partialTasks))
-		for _, task := range partialTasks { //run tasks in parallel
-			lgr := e.lgr.With(
-				zap.Any("class", p.scheme.Name),
-				zap.String("process", p.uuid),
-				zap.String("name", task.name),
-			)
-			go func(t *RtTask) {
-				defer wg.Done()
-				taskRunErr := e.runTask(ctx, p, t, lgr)
-				if taskRunErr != nil {
-					tes.AddError(p.uuid+":"+t.name, taskRunErr)
-				}
-			}(task)
-		}
-		wg.Wait()
-
-		err := p.persist(ctx, e.database)
-		if err != nil {
-			e.lgr.Error("persistent process state failed!",
-				zap.Any("class", p.scheme.Name),
-				zap.String("process", p.uuid),
-			)
-			return err
-		}
-
-		if tes.HasError() {
-			break
-		}
-	}
-
-	if tes.HasError() {
-		if tes.HasInternalErrorOnly() {
-			return tes.GetErrors() // internal errors, process will be retried.
-		}
-
-		e.lgr.WithOptions(zap.AddStacktrace(zap.FatalLevel)).Error("process encounters error", zap.Error(tes.GetErrors()))
-
-		if p.scheme.Retryable {
-			p.setStatus(StatusPausing)
-		} else {
-			p.setStatus(StatusFailure)
-		}
-
-		err := p.persist(ctx, e.database)
-		if err != nil {
-			e.lgr.Debug("update process to status failed", zap.Int("status", int(StatusFailure)), zap.Error(err))
-		}
-	} else {
-		p.setStatus(StatusSuccess)
-		err := p.persist(ctx, e.database)
-		if err != nil {
-			e.lgr.Debug("failed to update process status", zap.Int("status", int(StatusSuccess)), zap.Error(err))
-		}
-	}
-	return nil
-}
-
-func (e *Executor) dealSuccess(ctx context.Context, p *RtProcess) {
-	processContext := NewProcessContext(ctx, e.database, p)
-	if p.scheme.OnSuccess != nil {
-		p.scheme.OnSuccess(processContext)
-	}
-	e.notifier.TriggerComplete(ctx.Value(contextMetaKey))
-	e.doCompleteStat(ctx, p)
-}
-
-func (e *Executor) dealFailure(ctx context.Context, p *RtProcess) {
-	processContext := NewProcessContext(ctx, e.database, p)
-	if p.scheme.OnFailure != nil {
-		p.scheme.OnFailure(processContext)
-	}
-	e.notifier.TriggerComplete(ctx.Value(contextMetaKey))
-	e.doCompleteStat(ctx, p)
-}
-
-func (e *Executor) doCompleteStat(ctx context.Context, p *RtProcess) {
-	e.lgr.Info("process execute completely",
-		zap.Any("process name", p.scheme.Name),
-		zap.String("id", p.uuid),
-		zap.String("status", p.status.String()))
-
-	err := p.persistEndRunningStat(ctx, e.database)
+	err = json.Unmarshal(dbObject.Storage, storage)
 	if err != nil {
-		e.lgr.Error("save last stat error", zap.Error(err))
+		return nil, err
 	}
+	state.Storage = storage
+	return state, nil
 }
 
-func (e *Executor) spawn(ctx context.Context, p *RtProcess) {
-	for {
-		switch p.status {
-		case StatusPending:
-			if err := e.dealPending(ctx, p); err != nil {
-				e.lgr.Error("process dealPending error",
-					zap.Any("name", p.scheme.Name),
-					zap.String("id", p.uuid),
-					zap.Error(err))
-				e.notifier.TriggerInternalRetry(ctx.Value(contextMetaKey))
-				return
+var _ executor.SnapshotExporter = &DatabaseExporter{}
+
+type ProcessDispatcher struct {
+	name     string
+	lgr      *zap.Logger
+	notifier *Notifier
+	db       database.Database
+	release  chan struct{}
+}
+
+func (e *ProcessDispatcher) dispatch(ctx context.Context, meta *ProcessTrigger) {
+	id := meta.uuid
+	processScheme, err := scheme.Resolve(meta.class)
+	if err != nil {
+		e.lgr.Error("can't resolve the process scheme", zap.Error(err))
+		return
+	}
+	exporter := &DatabaseExporter{
+		db:       e.db,
+		scheme:   processScheme,
+		lgr:      e.lgr,
+		metadata: processMetadata{User: meta.user},
+	}
+	worker := executor.NewProcessWorker(id, processScheme, exporter, e.lgr)
+
+	go func() {
+		var err error
+		switch meta.event {
+		case "Run":
+			storage := processScheme.NewStorage()
+			err = json.Unmarshal(meta.data, storage)
+			if err == nil {
+				err = worker.Run(ctx, storage)
 			}
-		case StatusRunning: //process terminated accidentally in the past also will be resumed
-			internalErr := e.dealRunning(ctx, p)
-			if internalErr != nil {
-				e.lgr.Error("process dealRunning error",
-					zap.Any("process name", p.scheme.Name),
-					zap.String("id", p.uuid),
-					zap.Error(internalErr),
-				)
-				e.notifier.TriggerInternalRetry(ctx.Value(contextMetaKey))
-				return
-			}
-		case StatusPausing:
-			e.notifier.TriggerComplete(ctx.Value(contextMetaKey))
-			e.lgr.Info("process is in 'Pausing' status", zap.String("uuid", p.uuid))
-			return
-		case StatusSuccess:
-			e.dealSuccess(ctx, p)
-			return
-		case StatusFailure:
-			e.dealFailure(ctx, p)
-			return
+		case "Resume": //Interrupted
+			err = worker.Resume(ctx)
+		case "Retry":
+			err = worker.Retry(ctx)
+		case "Rollback":
+			err = worker.Rollback(ctx)
 		default:
-			panic("unknown process status")
+			err = errors.New("unknown trigger event: " + meta.event)
 		}
-	}
+
+		if err != nil {
+			panic(err) //TODO
+		}
+
+		e.notifier.TriggerComplete(meta)
+	}()
+
 }
 
-func (e *Executor) run(ctx context.Context, meta *ProcessMeta) {
-	ctx = context.WithValue(ctx, contextMetaKey, meta)
-
-	e.lgr.Debug("run process", zap.String("id", meta.uuid), zap.String("name", meta.class.Raw()))
-
-	data, err := newPendingProcessData(meta.uuid, meta.user, meta.class, meta.data)
-	if err != nil {
-		e.lgr.Warn("new pending process error", zap.String("id", meta.uuid), zap.Error(err))
-		return
-	}
-
-	obj, err := e.database.GetOrCreateInstance(ctx, *data)
-	if err != nil {
-		e.lgr.Warn("get or create process error", zap.String("id", meta.uuid), zap.Error(err))
-		return
-	}
-
-	p, err := makeRtProcess(obj)
-	if err != nil {
-		e.lgr.Warn("make process error", zap.String("id", meta.uuid), zap.Error(err))
-		return
-	}
-
-	if meta.rerun {
-		p.setStatus(StatusRunning)
-		if err := p.persist(ctx, e.database); err != nil {
-			e.lgr.Warn("can't update process status, rerun the process failed", zap.String("id", meta.uuid), zap.Error(err))
-			return
-		}
-	}
-
-	e.spawn(ctx, p)
-}
-
-func (e *Executor) Bootstrap(ctx context.Context, metaChan <-chan *ProcessMeta) {
-	ctx = context.WithValue(ctx, contextAgentNameKey, e.name)
+func (e *ProcessDispatcher) Bootstrap(ctx context.Context, metaChan <-chan *ProcessTrigger) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case meta := <-metaChan:
-			go e.run(ctx, meta)
+			e.dispatch(ctx, meta)
 		}
 	}
 }
 
-func NewExecutor(name string, notifyAgent *Notifier, db Database, lg *zap.Logger) *Executor {
-	return &Executor{
-		name:     name,
-		lgr:      lg,
-		database: db,
-		notifier: notifyAgent,
-	}
+func (e *ProcessDispatcher) Release() {
+	close(e.release)
 }
 
-func newPendingProcessData(
-	uuid,
-	user string,
-	class ProcessClass,
-	storage []byte,
-) (*database.ProcessDataPartial, error) {
-	scheme, err := Resolve(class)
-	if err != nil {
-		return nil, err
+func NewProcessDispatcher(name string, notifyAgent *Notifier, db database.Database, lgr *zap.Logger) *ProcessDispatcher {
+	e := &ProcessDispatcher{
+		name:     name,
+		lgr:      lgr,
+		notifier: notifyAgent,
+		db:       db,
+		release:  make(chan struct{}),
 	}
-	orchestration := scheme.NewOrchestration()
-	pstate := NewPlanState()
-	orchestration.Prepare(pstate)
-	pstateBytes, err := serializePlanState(pstate)
-	if err != nil {
-		return nil, err
-	}
-	dbDataPartial := &database.ProcessDataPartial{
-		Uuid:      uuid,
-		User:      user,
-		Class:     class.Raw(),
-		Status:    StatusPending.Raw(),
-		Storage:   storage,
-		PlanState: pstateBytes,
-	}
-	return dbDataPartial, nil
+	return e
 }

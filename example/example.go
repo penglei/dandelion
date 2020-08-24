@@ -7,6 +7,7 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/pborman/uuid"
 	"github.com/penglei/dandelion"
+	"github.com/penglei/dandelion/scheme"
 	"go.uber.org/zap"
 	"log"
 	"net/http"
@@ -171,16 +172,16 @@ func registerMeshInstallJob(job *meshInstalling) {
 	}
 
 	installMeshProcess := &dandelion.ProcessScheme{
-		Name:          TestInstall,
-		Retryable:     true,
-		NewStorage:    func() interface{} { return &InstallingStorage{} },
-		Orchestration: dandelion.NewChain([]TaskScheme{t1, t2}),
+		Name:       TestInstall,
+		Retryable:  true,
+		NewStorage: func() interface{} { return &InstallingStorage{} },
+		Tasks:      []TaskScheme{t1, t2},
 		OnFailure: func(ctx dandelion.Context) {
 			log.Printf("failure, storage:%v\n", ctx.Global())
 		},
 	}
 
-	dandelion.Register(installMeshProcess)
+	scheme.Register(installMeshProcess)
 
 }
 
@@ -222,14 +223,15 @@ func (mj *meshInstalling) FirstTask(ctx Context) error {
 	log.Printf("FirstTask set data: %v", mj.Data)
 	//panic("FirstTask panic!")
 	//time.Sleep(time.Second * 2)
-	return ctx.Save()
+	return nil
 }
 
 func (mj *meshInstalling) SecondTask(ctx Context) error {
 	storage := ctx.Global().(*InstallingStorage)
 	log.Printf("SecondTask running, storage: %v, data: %v\n", storage, mj.Data)
 	mj.K8sSvc.GetCluster(storage.MeshName)
-	time.Sleep(30 * time.Second)
+	//time.Sleep(10 * time.Second)
 	//return fmt.Errorf("custom error in second")
+	panic("SecondTask panic")
 	return nil
 }

@@ -44,8 +44,10 @@ type IActionHandle interface {
 	onWaitRetry(eventCtx EventContext) EventType
 	onEnd(eventCtx EventContext) EventType
 	onFailed(eventCtx EventContext) EventType
+	onSuccessful(eventCtx EventContext) EventType
 	onCompensating(eventCtx EventContext) EventType
 	onDirty(eventCtx EventContext) EventType
+	onReverted(eventCtx EventContext) EventType
 }
 
 func NewTaskFSM(action IActionHandle, store fsm.IStore) *fsm.StateMachine {
@@ -83,7 +85,7 @@ func NewTaskFSM(action IActionHandle, store fsm.IStore) *fsm.StateMachine {
 				Action: ActionHandle(action.onEnd),
 			},
 			Successful: State{
-				Action: ActionHandle(action.onEnd),
+				Action: ActionHandle(action.onSuccessful),
 			},
 			Failed: State{
 				Action: ActionHandle(action.onFailed),
@@ -167,7 +169,7 @@ func NewProcessFSM(controller IActionHandle, store fsm.IStore) *fsm.StateMachine
 				Action: ActionHandle(controller.onDirty),
 			},
 			Reverted: State{
-				Action: ActionHandle(controller.onEnd),
+				Action: ActionHandle(controller.onReverted),
 			},
 		},
 	}

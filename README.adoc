@@ -7,49 +7,40 @@ internal data type converting path
 [source]
 ----
 
- +---------+                        +-----------------------+
- | FlowMeta|------ save to db ----> |database.FlowMetaObject|
- +---------+                        +-----------------------+
-    |   ^                                       |      |
-    |   |                                       |      |
-    |   |                                       |      |
-    |   +----------- load from db --------------+      |
+ +---------------+                        +------------------------------+
+ | ProcessTrigger|------- save to db ----> |database.ProcessTriggerObject|
+ +---------------+                        +------------------------------+
+    |   ^                                         |    |
+    |   |                                         |    |
+    |   |                                         |    |
+    |   +----------- load from db ----------------+    |
     |                                                  |convert to pending flow
     |                                                  |
     |                                                  |
-    |       +-----------------------------+            |
-    +------>|   database.FlowDataPartial  |<-----------+
-            +-----------------------------+
+    |       +-------------------------------+          |
+    +------>|   database.ProcessDataPartial |<---------+
+            +-------------------------------+
                     |
                     |
                     |
                     |save to db
                     |
-                    |               +--------------------------+
-                    |               |                          |
-                    +-------------->| database.FlowDataObject  |
-                                    |                          |
-                                    +--------------------------+
+                    |               +-----------------------------+
+                    |               |                             |
+                    +-------------->| database.ProcessDataObject  |
+                                    |                             |
+                                    +-----------------------------+
                                                      |
                                                      |
                                                      |
-             +------+                                |
-             | Flow |<---------load and generate-----+
-             +------+
+             +---------+                             |
+             | Process |<------load and generate-----+
+             +---------+
                 |
                 |
                 |
                 |    execute     +------+
-                +------------->  | Task |
+                +--------------->| Task |
                                  +------+
 ----
 
-== TODO
-
-* query flow status in runtime
-* use log: github.com/uber-go/zap **
-* task orchestration can visit flow scheme
-* save id (offset) in flow
-* FlowShapingManager can be protected by RCU
-* hide internal definition
-* implement DAG task orchestration

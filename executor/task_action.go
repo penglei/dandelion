@@ -2,6 +2,7 @@ package executor
 
 import (
 	"fmt"
+	"go.uber.org/zap"
 	"runtime/debug"
 	"time"
 )
@@ -43,11 +44,13 @@ var ErrInterrupt = registerError("ErrorInterrupt")
 
 type taskController struct {
 	model *taskMachine
+	lgr   *zap.Logger
 }
 
-func NewTaskController(machine *taskMachine) IActionHandle {
+func NewTaskController(machine *taskMachine, lgr *zap.Logger) IActionHandle {
 	return &taskController{
 		model: machine,
+		lgr:   lgr,
 	}
 }
 func (tc *taskController) Info() string {
@@ -55,6 +58,7 @@ func (tc *taskController) Info() string {
 }
 
 func (tc *taskController) onRunning(eventCtx EventContext) EventType {
+	tc.lgr.Info("task onRunning")
 	scheme := tc.model.scheme
 	processId := tc.model.parent.id
 	processState := &tc.model.parent.state
@@ -74,7 +78,12 @@ func (tc *taskController) onRunning(eventCtx EventContext) EventType {
 	}
 
 	taskRunningErr := interceptParentDone(eventCtx, func() error {
-		return timeoutWrapper(10*time.Second, routine)
+		if scheme.Timeout > 0 {
+			timeout := time.Duration(scheme.Timeout)
+			return timeoutWrapper(timeout*time.Second, routine)
+		} else {
+			return routine()
+		}
 	})
 
 	var event EventType
@@ -108,6 +117,12 @@ func (tc *taskController) onWaitRetry(eventCtx EventContext) EventType {
 }
 
 func (tc *taskController) onFailed(eventCtx EventContext) EventType {
+	tc.lgr.Warn("task failed", zap.Error(tc.model.err))
+	return NoOp
+}
+
+func (tc *taskController) onSuccessful(eventCtx EventContext) EventType {
+	tc.lgr.Info("task onSuccessful")
 	return NoOp
 }
 
@@ -159,6 +174,10 @@ func (tc *taskController) onDirty(eventCtx EventContext) EventType {
 }
 
 func (tc *taskController) onEnd(eventCtx EventContext) EventType {
+	return NoOp
+}
+
+func (tc *taskController) onReverted(eventCtx EventContext) EventType {
 	return NoOp
 }
 

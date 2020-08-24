@@ -29,8 +29,9 @@ func (t TaskFn) Compensate(ctx Context) error {
 }
 
 type TaskScheme struct {
-	Name string
-	Task TaskHandle
+	Name    string
+	Task    TaskHandle
+	Timeout int //seconds
 }
 
 type ProcessClass string

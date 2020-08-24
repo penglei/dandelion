@@ -103,16 +103,17 @@ func TestRuntime(t *testing.T) {
 	assert.NilError(t, err)
 	zap.ReplaceGlobals(lgr)
 
-	exporter := newMemorySnapshotExporter()
-	pm := NewProcessManager(exporter, lgr)
-	ctx := context.Background()
-
 	processId := "aaa"
 	testProcessScheme, err := scheme.Resolve(name)
 	assert.NilError(t, err)
+
+	exporter := newMemorySnapshotExporter()
+	w := NewProcessWorker(processId, testProcessScheme, exporter, lgr)
+	ctx := context.Background()
+
 	storage := testProcessScheme.NewStorage().(*appStorage)
 
-	err = pm.Run(ctx, processId, *testProcessScheme, storage)
+	err = w.Run(ctx, storage)
 	assert.NilError(t, err)
 
 	snapshot := make(map[string]ProcessState)
@@ -122,9 +123,8 @@ func TestRuntime(t *testing.T) {
 
 	disableTestPanic = true
 
-	err = pm.Retry(ctx, processId, *testProcessScheme)
+	err = w.Retry(ctx)
 	assert.NilError(t, err)
-
 
 	err = json.Unmarshal(exporter.data, &snapshot)
 	assert.NilError(t, err)

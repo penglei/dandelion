@@ -21,8 +21,16 @@ const (
 // StateType represents an extensible state type in the state machine.
 type StateType string
 
+func (s StateType) String() string {
+	return string(s)
+}
+
 // EventType represents an extensible event type in the state machine.
 type EventType string
+
+func (e EventType) String() string {
+	return string(e)
+}
 
 // EventContext represents the context to be passed to the action implementation.
 type EventContext struct {

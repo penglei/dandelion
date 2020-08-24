@@ -11,12 +11,30 @@ import (
 	"github.com/penglei/dandelion/database"
 	"github.com/penglei/dandelion/database/mysql"
 	"github.com/penglei/dandelion/ratelimit"
+	"github.com/penglei/dandelion/scheme"
 	"go.uber.org/zap"
 	"sync"
 	"time"
 )
 
 type Sequence = ratelimit.Sequence
+
+type ProcessTrigger struct {
+	id    int64 //must be total order
+	user  string
+	uuid  string
+	class ProcessClass
+	data  []byte
+	event string //Run, Resume, Retry, Rollback
+}
+
+func (m *ProcessTrigger) GetOffset() int64 {
+	return m.id
+}
+
+func (m *ProcessTrigger) GetUUID() string {
+	return m.uuid
+}
 
 const (
 	PollInterval         = time.Second * 3
@@ -57,7 +75,7 @@ func (m *ShapingManager) Remove(key string) {
 	m.mutex.Unlock()
 }
 
-func (m *ShapingManager) PickOutAll() []*ProcessMeta {
+func (m *ShapingManager) PickOutAll() []*ProcessTrigger {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
@@ -66,14 +84,14 @@ func (m *ShapingManager) PickOutAll() []*ProcessMeta {
 		origins = append(origins, q.PickOut()...)
 	}
 
-	metas := make([]*ProcessMeta, 0, len(origins))
+	metas := make([]*ProcessTrigger, 0, len(origins))
 	for _, e := range origins {
-		metas = append(metas, e.(*ProcessMeta))
+		metas = append(metas, e.(*ProcessTrigger))
 	}
 	return metas
 }
 
-func (m *ShapingManager) Commit(key string, meta *ProcessMeta) {
+func (m *ShapingManager) Commit(key string, meta *ProcessTrigger) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
@@ -83,7 +101,7 @@ func (m *ShapingManager) Commit(key string, meta *ProcessMeta) {
 	}
 }
 
-func (m *ShapingManager) Rollback(key string, meta *ProcessMeta) {
+func (m *ShapingManager) Rollback(key string, meta *ProcessTrigger) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
@@ -104,7 +122,7 @@ func NewShapingManager() *ShapingManager {
 type Process struct {
 	Uuid    string
 	Class   string
-	Status  Status
+	Status  string
 	storage []byte
 }
 
@@ -119,14 +137,13 @@ type Task struct {
 }
 
 func (p *Process) UnmarshalState(state interface{}) error {
-	return deserializeStorage(p.storage, state)
+	return json.Unmarshal(p.storage, state)
 }
 
 type RuntimeBuilder struct {
-	name      string
-	lg        *zap.Logger
-	rawDb     *sql.DB
-	workerNum int
+	name  string
+	lg    *zap.Logger
+	rawDb *sql.DB
 }
 
 func NewRuntimeBuilder(opts ...Option) *RuntimeBuilder {
@@ -160,11 +177,9 @@ func (rb *RuntimeBuilder) Build() *Runtime {
 		lockAgent:        la,
 		lockAgentBuilder: laBuilder,
 		lockAgentMutex:   sync.RWMutex{},
-		metaChan:         make(chan *ProcessMeta),
-		eventChan:        make(chan Event),
+		metaChan:         make(chan *ProcessTrigger),
+		eventChan:        make(chan RtEvent),
 		shapingManager:   NewShapingManager(),
-		executors:        make([]*Executor, 0),
-		workerNum:        rb.workerNum,
 	}
 }
 
@@ -186,19 +201,13 @@ func WithLogger(lg *zap.Logger) Option {
 	}
 }
 
-func WithWorkerNum(n int) Option {
-	return func(rb *RuntimeBuilder) {
-		rb.workerNum = n
-	}
-}
-
 func WithDB(db *sql.DB) Option {
 	return func(rb *RuntimeBuilder) {
 		rb.rawDb = db
 	}
 }
 
-type Event interface {
+type RtEvent interface {
 	Payload() interface{}
 }
 
@@ -206,34 +215,21 @@ type Event interface {
 type CompletionEvent struct {
 }
 
-//Runtime.onProcessInternalRetry
-type InternalRetryEvent struct {
-}
-
-type ResumeEvent struct {
-	meta *ProcessMeta
-}
-
-func (e ResumeEvent) Payload() interface{} {
-	return e.meta
-}
-
 type Runtime struct {
 	ctx              context.Context
 	lg               *zap.Logger
 	name             string //name(consumer or producer)
-	db               Database
+	db               database.Database
 	lockGranularity  string
 	checkInterval    time.Duration
 	errorCount       int
 	lockAgent        LockAgent
 	lockAgentBuilder func() (LockAgent, error)
 	lockAgentMutex   sync.RWMutex
-	metaChan         chan *ProcessMeta //spmc
+	metaChan         chan *ProcessTrigger //spmc
 	shapingManager   *ShapingManager
-	eventChan        chan Event
-	executors        []*Executor
-	workerNum        int
+	eventChan        chan RtEvent
+	dispatcher       *ProcessDispatcher
 }
 
 func NewDefaultRuntime(name string, db *sql.DB) *Runtime {
@@ -241,7 +237,6 @@ func NewDefaultRuntime(name string, db *sql.DB) *Runtime {
 		WithName(name),
 		WithDB(db),
 		WithLogger(zap.L()),
-		WithWorkerNum(4),
 	)
 	return builder.Build()
 }
@@ -257,23 +252,19 @@ func (rt *Runtime) Bootstrap(ctx context.Context) error {
 	go func() {
 		err := rt.iterate(ctx)
 		if err != nil {
-			rt.lg.Error("process dispatcher exit error", zap.Error(err))
+			rt.lg.Error("trigger iterator exit error", zap.Error(err))
 			return
 		}
-		rt.lg.Info("process dispatcher has exited")
+		rt.lg.Info("trigger iterator has exited")
 	}()
 
 	notifyAgent := &Notifier{}
 	notifyAgent.RegisterProcessComplete(rt.onProcessComplete)
-	notifyAgent.RegisterProcessInternalRetry(rt.onProcessInternalRetry)
-
-	for i := 0; i < rt.workerNum; i += 1 {
-		executor := NewExecutor(rt.name, notifyAgent, rt.db, rt.lg)
-		rt.executors = append(rt.executors, executor)
-		go func() {
-			executor.Bootstrap(ctx, rt.metaChan)
-		}()
-	}
+	//notifyAgent.RegisterProcessInternalRetry(rt.onProcessInternalRetry)
+	rt.dispatcher = NewProcessDispatcher(rt.name, notifyAgent, rt.db, rt.lg)
+	go func() {
+		rt.dispatcher.Bootstrap(ctx, rt.metaChan)
+	}()
 
 	return nil
 }
@@ -288,15 +279,16 @@ func (rt *Runtime) Submit(
 	if err != nil {
 		return "", err
 	}
-	dbMeta := database.ProcessMetaObject{
+	dbMeta := database.ProcessTriggerObject{
 		UUID:  uuid.New(),
 		User:  user,
 		Class: class.Raw(),
 		Data:  data,
+		Event: "Run",
 	}
 
 	//save it
-	err = rt.db.CreateProcessMeta(ctx, &dbMeta)
+	err = rt.db.CreateProcessTrigger(ctx, &dbMeta)
 	if err != nil {
 		return "", err
 	}
@@ -313,9 +305,9 @@ func (rt *Runtime) Resume(ctx context.Context, uuid string) error {
 		return errors.New("process instance not found: " + uuid)
 	}
 
-	id, err := rt.db.CreateRerunProcessMeta(ctx, processData.User, processData.Class, processData.Uuid)
+	id, err := rt.db.CreateResumeProcessTrigger(ctx, processData.User, processData.Class, processData.Uuid)
 	if err == nil {
-		rt.lg.Info("process rerun submitted",
+		rt.lg.Info("process event submitted",
 			zap.String("uuid", processData.Uuid), zap.Int64("ID", id))
 	}
 	return err
@@ -333,12 +325,12 @@ func (rt *Runtime) GetProcess(ctx context.Context, uuid string) (*Process, error
 	p := &Process{
 		Uuid:    processData.Uuid,
 		Class:   processData.Class,
-		Status:  StatusFromRaw(processData.Status),
+		Status:  processData.Status,
 		storage: processData.Storage,
 	}
 
 	/*
-		scheme, err := Resolve(ClassFromRaw(processObj.Class))
+		scheme, err := Resolve(scheme.ClassFromRaw(processObj.Class))
 		if err != nil {
 			return err
 		}
@@ -356,7 +348,7 @@ func (rt *Runtime) GetProcessTasks(ctx context.Context, uuid string) ([]*Task, e
 	for _, item := range taskDataObjects {
 		tasks = append(tasks, &Task{
 			Name:      item.Name,
-			Status:    StatusFromRaw(item.Status).String(),
+			Status:    item.Status,
 			ErrorCode: item.ErrorCode,
 			ErrorMsg:  item.ErrorMsg,
 			StartedAt: item.StartedAt,
@@ -366,21 +358,21 @@ func (rt *Runtime) GetProcessTasks(ctx context.Context, uuid string) ([]*Task, e
 	return tasks, nil
 }
 
-func (rt *Runtime) fetchAllFlyingProcesses(ctx context.Context) ([]*ProcessMeta, error) {
-	objects, err := rt.db.LoadUncommittedMeta(ctx)
+func (rt *Runtime) fetchAllFlyingProcesses(ctx context.Context) ([]*ProcessTrigger, error) {
+	objects, err := rt.db.LoadUncommittedTrigger(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	metas := make([]*ProcessMeta, 0)
+	metas := make([]*ProcessTrigger, 0)
 	for _, obj := range objects {
-		metas = append(metas, &ProcessMeta{
+		metas = append(metas, &ProcessTrigger{
 			id:    obj.ID,
 			uuid:  obj.UUID,
 			user:  obj.User,
-			class: ClassFromRaw(obj.Class),
+			class: scheme.ClassFromRaw(obj.Class),
 			data:  obj.Data,
-			rerun: obj.Rerun == 1,
+			event: obj.Event,
 		})
 	}
 	return metas, nil
@@ -408,11 +400,11 @@ func (rt *Runtime) iterate(ctx context.Context) error {
 	}
 }
 
-func (rt *Runtime) dealEvent(event Event) {
+func (rt *Runtime) dealEvent(event RtEvent) {
 }
 
 func (rt *Runtime) onLockAgentError(reason error) {
-	//TODO pause/stop all executors
+	//TODO pause/stop executor
 	fmt.Printf("!!! lock agent connection lost. error : %v\n", reason)
 
 	retryTicker := time.NewTicker(time.Second * 5)
@@ -435,18 +427,18 @@ func (rt *Runtime) onLockAgentError(reason error) {
 			rt.lockAgentMutex.Lock()
 			rt.lockAgent = lockAgent
 			rt.lockAgentMutex.Unlock()
-			//TODO resume all executors
+			//TODO resume executor
 			return
 		}
 	}
 }
 
 func (rt *Runtime) onProcessComplete(item interface{}) {
-	meta := item.(*ProcessMeta)
+	meta := item.(*ProcessTrigger)
 	key := rt.getQueueName(meta)
 	rt.shapingManager.Commit(key, meta)
 
-	err := rt.db.DeleteProcessMeta(rt.ctx, meta.uuid)
+	err := rt.db.DeleteProcessTrigger(rt.ctx, meta.uuid)
 	if err != nil {
 		rt.lg.Error("delete process meta failed", zap.Error(err))
 	}
@@ -459,16 +451,16 @@ func (rt *Runtime) onProcessComplete(item interface{}) {
 
 func (rt *Runtime) onProcessInternalRetry(item interface{}) {
 	//TODO send to eventChan and process by dispatch routine
-	meta := item.(*ProcessMeta)
+	meta := item.(*ProcessTrigger)
 	key := rt.getQueueName(meta)
 	rt.shapingManager.Rollback(key, meta)
 }
 
-func (rt *Runtime) dispatch(ctx context.Context, metas []*ProcessMeta) {
+func (rt *Runtime) dispatch(ctx context.Context, metas []*ProcessTrigger) {
 	eventsMapQueue := make(map[string]Sequence)
 
 	for _, meta := range metas {
-		if _, err := Resolve(meta.class); err != nil {
+		if _, err := scheme.Resolve(meta.class); err != nil {
 			rt.lg.Warn("unrecognized process", zap.Error(err), zap.String("id", meta.uuid))
 			continue
 		}
@@ -504,7 +496,7 @@ func (rt *Runtime) dispatch(ctx context.Context, metas []*ProcessMeta) {
 	rt.forward()
 }
 
-func (rt *Runtime) getQueueName(meta *ProcessMeta) string {
+func (rt *Runtime) getQueueName(meta *ProcessTrigger) string {
 	queueName := fmt.Sprintf("%s:%s:%s", rt.lockGranularity, meta.user, meta.class)
 	return queueName
 }
@@ -520,8 +512,7 @@ func (rt *Runtime) forward() {
 			rt.lg.Info("forward a process",
 				zap.Any("class", meta.class),
 				zap.String("user", meta.user),
-				zap.String("uuid", meta.uuid),
-				zap.Bool("rerun", meta.rerun))
+				zap.String("uuid", meta.uuid))
 		case <-ctx.Done():
 			return
 		}
