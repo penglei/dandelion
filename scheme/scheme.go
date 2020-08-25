@@ -50,10 +50,8 @@ type ProcessScheme struct {
 	NewStorage func() interface{}
 	//Orchestration func() TaskSorting
 	Tasks      []TaskScheme
-	OnStart    func(Context) error //calling before entering running status
-	OnResume   func(Context) error //calling when resuming running status
 	OnSuccess  func(Context)
-	OnFailure  func(Context)
+	OnFailed   func(Context)
 	namedTasks map[string]TaskScheme
 }
 

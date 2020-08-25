@@ -1,9 +1,5 @@
 package ratelimit
 
-import (
-	"fmt"
-)
-
 type QueuedThrottle struct {
 	lastOffset    int64
 	runningOffset int64
@@ -44,6 +40,7 @@ func (q *QueuedThrottle) Commit(target OrderedMeta) {
 	q.runningOffset = 0
 }
 
+/*
 func (q *QueuedThrottle) Rollback(offset int64) {
 	if q.runningOffset == offset {
 		q.runningOffset = 0
@@ -52,7 +49,9 @@ func (q *QueuedThrottle) Rollback(offset int64) {
 	}
 }
 
-func (q *QueuedThrottle) PickOut() []OrderedMeta {
+*/
+
+func (q *QueuedThrottle) PickOutFront() []OrderedMeta {
 	if q.runningOffset == 0 {
 		frontElem := q.queue.Front()
 		if frontElem != nil {

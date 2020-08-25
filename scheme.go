@@ -10,3 +10,7 @@ type TaskScheme = scheme.TaskScheme
 type Context = scheme.Context
 type TaskHandle = scheme.TaskHandle
 type TaskFn = scheme.TaskFn
+
+func Register(processScheme *ProcessScheme) {
+	scheme.Register(processScheme)
+}

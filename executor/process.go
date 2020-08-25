@@ -25,9 +25,12 @@ func NewProcessWorker(
 		state:    NewProcessState(),
 	}
 
-	lgr = lgr.With(zap.String("processId", processId), zap.String("name", scheme.Name.Raw()))
 	controller := NewProcessController(instance, lgr)
 	processFsm := NewProcessFSM(controller, instance)
+
+	if scheme.Retryable {
+		processFsm.States[Failed].Events[Retry] = Running
+	}
 
 	//cycle dependency
 	instance.fsm = processFsm

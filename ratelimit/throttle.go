@@ -6,9 +6,8 @@ type Sequence = *list.List
 
 type Shaper interface {
 	MergeInto(Sequence)
-	PickOut() []OrderedMeta
+	PickOutFront() []OrderedMeta
 	Commit(OrderedMeta)
-	Rollback(int64)
 }
 
 type OrderedMeta interface {

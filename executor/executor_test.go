@@ -85,7 +85,7 @@ func registerTestProcess(name scheme.ProcessClass) {
 		Retryable:  true,
 		NewStorage: func() interface{} { return &appStorage{} },
 		Tasks:      []scheme.TaskScheme{t1, t2},
-		OnFailure: func(ctx scheme.Context) {
+		OnFailed: func(ctx scheme.Context) {
 			log.Printf("failure, storage:%v\n", ctx.Global())
 		},
 	}

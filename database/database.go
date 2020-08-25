@@ -7,18 +7,13 @@ import (
 	"time"
 )
 
-type ProcessDataPartial struct {
+type ProcessDataObject struct {
 	Uuid    string
 	User    string
 	Class   string
 	Status  string
 	Storage []byte
 	State   []byte //all state
-}
-
-type ProcessDataObject struct {
-	ProcessDataPartial
-	ID int64
 }
 
 type ProcessTriggerObject struct {
@@ -44,15 +39,14 @@ type TaskDataObject struct {
 type Database interface {
 	LoadUncommittedTrigger(context.Context) ([]*ProcessTriggerObject, error)
 	CreateProcessTrigger(ctx context.Context, meta *ProcessTriggerObject) error
-	CreateResumeProcessTrigger(ctx context.Context, user, class, uuid string) (int64, error)
-	DeleteProcessTrigger(ctx context.Context, uuid string) error
-	GetInstance(ctx context.Context, uuid string) (*ProcessDataObject, error)
-	//GetOrCreateInstance(ctx context.Context, processData ProcessDataPartial) (ProcessDataObject, error)
-	UpsertProcess(ctx context.Context, processData ProcessDataObject) error
-	//CreatePendingInstance(context.Context, ProcessDataPartial) error
+	DeleteProcessTrigger(ctx context.Context, processUuid string) error
+	InitProcessInstanceOnce(ctx context.Context, data ProcessDataObject) error
+	GetProcess(ctx context.Context, id string) (*ProcessDataObject, error)
+	UpsertProcessContext(ctx context.Context, processData ProcessDataObject) error
+	UpdateProcessStat(ctx context.Context, processUuid, agentName string, mask util.BitMask) error
 	//UpdateProcess(ctx context.Context, obj ProcessDataObject, agentName string, mask util.BitMask) error
 	//SaveProcessStorage(ctx context.Context, processId int64, data []byte) error
 	UpsertTask(ctx context.Context, taskData TaskDataObject, mask util.BitMask) error
 	//LoadTasks(ctx context.Context, processId int64) ([]*TaskDataObject, error)
-	GetProcessTasks(ctx context.Context, uuid string) ([]*TaskDataObject, error)
+	GetProcessTasks(ctx context.Context, processId string) ([]*TaskDataObject, error)
 }

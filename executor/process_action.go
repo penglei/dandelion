@@ -1,7 +1,9 @@
 package executor
 
 import (
+	"context"
 	"github.com/penglei/dandelion/fsm"
+	"github.com/penglei/dandelion/scheme"
 	"go.uber.org/zap"
 )
 
@@ -106,13 +108,34 @@ func (p *processController) onEnd(eventCtx EventContext) EventType {
 	return NoOp
 }
 
+func (p *processController) runCallback(ctx context.Context, label string, cb func(scheme.Context)) {
+	out := safetyRun(ctx, func() error {
+		ctx := NewActionContext(ctx, p.model.id, &p.model.state)
+		cb(ctx)
+		return nil
+	})
+	select {
+	case <-ctx.Done():
+	case e := <-out:
+		if e != nil {
+			p.lgr.Error("an error occurred when running callback", zap.Error(e), zap.String("callback", label))
+		}
+	}
+}
+
 func (p *processController) onFailed(eventCtx EventContext) EventType {
 	p.lgr.Info("process onFailed")
+	if p.model.scheme.OnFailed != nil {
+		p.runCallback(eventCtx, "OnFailed", p.model.scheme.OnFailed)
+	}
 	return NoOp
 }
 
 func (p *processController) onSuccessful(eventCtx EventContext) EventType {
 	p.lgr.Info("process onSuccessful")
+	if p.model.scheme.OnSuccess != nil {
+		p.runCallback(eventCtx, "OnSuccess", p.model.scheme.OnSuccess)
+	}
 	return NoOp
 }
 

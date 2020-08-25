@@ -84,6 +84,7 @@ func (t *taskMachine) Restate(s TaskState) {
 
 func (t *taskMachine) Save(persistence fsm.Persistence) error {
 	t.parent.SaveTaskState(t.scheme, persistence)
+	//fmt.Printf("err: %+v\n", t.err)
 	return nil
 }
 
@@ -117,6 +118,11 @@ func NewTaskMachine(
 	}
 	controller := NewTaskController(taskInstance, lgr)
 	taskFsm := NewTaskFSM(controller, taskInstance)
+
+	if parent.scheme.Retryable {
+		taskFsm.States[Failed].Events[Retry] = Running
+	}
+
 	taskInstance.fsm = taskFsm
 	//taskInstance.initial = TaskState{}
 	return taskInstance

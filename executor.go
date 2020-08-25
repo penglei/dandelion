@@ -7,6 +7,7 @@ import (
 	"github.com/penglei/dandelion/database"
 	"github.com/penglei/dandelion/executor"
 	"github.com/penglei/dandelion/scheme"
+	"github.com/penglei/dandelion/util"
 	"go.uber.org/zap"
 )
 
@@ -35,19 +36,16 @@ func (de *DatabaseExporter) Write(processId string, snapshot executor.ProcessSta
 	if err != nil {
 		return err
 	}
+	currentStatus := snapshot.FsmPersistence.Current
 	data := database.ProcessDataObject{
-		ProcessDataPartial: database.ProcessDataPartial{
-			Uuid:    processId,
-			User:    de.metadata.User,
-			Class:   de.scheme.Name.Raw(),
-			Status:  snapshot.FsmPersistence.Current.String(),
-			State:   stateBytes,
-			Storage: storageBytes,
-		},
+		Uuid:    processId,
+		Status:  currentStatus.String(),
+		State:   stateBytes,
+		Storage: storageBytes,
 	}
-	err = de.db.UpsertProcess(ctx, data)
-	if err != nil {
 
+	err = de.db.UpsertProcessContext(ctx, data)
+	if err != nil {
 		de.lgr.Debug("saved snapshot: " + string(stateBytes))
 	}
 	return err
@@ -55,21 +53,21 @@ func (de *DatabaseExporter) Write(processId string, snapshot executor.ProcessSta
 
 func (de *DatabaseExporter) Read(processId string) (*executor.ProcessState, error) {
 	ctx := context.Background()
-	dbObject, err := de.db.GetInstance(ctx, processId)
+	processDataObject, err := de.db.GetProcess(ctx, processId)
 	if err != nil {
 		return nil, err
 	}
 
 	state := &executor.ProcessState{}
 
-	err = json.Unmarshal(dbObject.State, state)
+	err = json.Unmarshal(processDataObject.State, state)
 	if err != nil {
 		return nil, err
 	}
 
 	storage := de.scheme.NewStorage() // checking pointer?
 
-	err = json.Unmarshal(dbObject.Storage, storage)
+	err = json.Unmarshal(processDataObject.Storage, storage)
 	if err != nil {
 		return nil, err
 	}
@@ -100,29 +98,45 @@ func (e *ProcessDispatcher) dispatch(ctx context.Context, meta *ProcessTrigger) 
 		lgr:      e.lgr,
 		metadata: processMetadata{User: meta.user},
 	}
-	worker := executor.NewProcessWorker(id, processScheme, exporter, e.lgr)
+
+	lgr := e.lgr.WithOptions(zap.AddStacktrace(zap.FatalLevel)).
+		With(zap.String("processId", id),
+			zap.String("name", processScheme.Name.Raw()))
+
+	proc := executor.NewProcessWorker(id, processScheme, exporter, lgr)
 
 	go func() {
 		var err error
 		switch meta.event {
 		case "Run":
+			if err := e.db.InitProcessInstanceOnce(ctx, database.ProcessDataObject{
+				Uuid:  meta.uuid,
+				User:  meta.user,
+				Class: meta.class.Raw(),
+			}); err != nil {
+				lgr.Warn("call process initialize once failed", zap.Error(err))
+			}
 			storage := processScheme.NewStorage()
 			err = json.Unmarshal(meta.data, storage)
 			if err == nil {
-				err = worker.Run(ctx, storage)
+				err = proc.Run(ctx, storage)
 			}
+
 		case "Resume": //Interrupted
-			err = worker.Resume(ctx)
+			err = proc.Resume(ctx)
 		case "Retry":
-			err = worker.Retry(ctx)
+			err = proc.Retry(ctx)
 		case "Rollback":
-			err = worker.Rollback(ctx)
+			err = proc.Rollback(ctx)
 		default:
 			err = errors.New("unknown trigger event: " + meta.event)
 		}
-
 		if err != nil {
-			panic(err) //TODO
+			panic(err) //unreachable!
+		}
+
+		if err := e.db.UpdateProcessStat(ctx, meta.uuid, e.name, util.ProcessSetCompleteStat); err != nil {
+			lgr.Warn("save process statistic information failed", zap.Error(err))
 		}
 
 		e.notifier.TriggerComplete(meta)

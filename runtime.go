@@ -25,7 +25,7 @@ type ProcessTrigger struct {
 	uuid  string
 	class ProcessClass
 	data  []byte
-	event string //Run, Resume, Retry, Rollback
+	event string //Run, Retry, Rollback, (Resume?)
 }
 
 func (m *ProcessTrigger) GetOffset() int64 {
@@ -75,13 +75,13 @@ func (m *ShapingManager) Remove(key string) {
 	m.mutex.Unlock()
 }
 
-func (m *ShapingManager) PickOutAll() []*ProcessTrigger {
+func (m *ShapingManager) PickOutAllFront() []*ProcessTrigger {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
 	origins := make([]ratelimit.OrderedMeta, 0)
 	for _, q := range m.queues {
-		origins = append(origins, q.PickOut()...)
+		origins = append(origins, q.PickOutFront()...)
 	}
 
 	metas := make([]*ProcessTrigger, 0, len(origins))
@@ -98,16 +98,6 @@ func (m *ShapingManager) Commit(key string, meta *ProcessTrigger) {
 	q, ok := m.queues[key]
 	if ok {
 		q.Commit(meta)
-	}
-}
-
-func (m *ShapingManager) Rollback(key string, meta *ProcessTrigger) {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
-
-	q, ok := m.queues[key]
-	if ok {
-		q.Rollback(meta.GetOffset())
 	}
 }
 
@@ -178,7 +168,7 @@ func (rb *RuntimeBuilder) Build() *Runtime {
 		lockAgentBuilder: laBuilder,
 		lockAgentMutex:   sync.RWMutex{},
 		metaChan:         make(chan *ProcessTrigger),
-		eventChan:        make(chan RtEvent),
+		rtEventChan:      make(chan RtEvent),
 		shapingManager:   NewShapingManager(),
 	}
 }
@@ -213,12 +203,19 @@ type RtEvent interface {
 
 //Runtime.onProcessComplete
 type CompletionEvent struct {
+	meta *ProcessTrigger
 }
+
+func (c *CompletionEvent) Payload() interface{} {
+	return c.meta
+}
+
+var _ RtEvent = &CompletionEvent{}
 
 type Runtime struct {
 	ctx              context.Context
 	lg               *zap.Logger
-	name             string //name(consumer or producer)
+	name             string
 	db               database.Database
 	lockGranularity  string
 	checkInterval    time.Duration
@@ -228,7 +225,7 @@ type Runtime struct {
 	lockAgentMutex   sync.RWMutex
 	metaChan         chan *ProcessTrigger //spmc
 	shapingManager   *ShapingManager
-	eventChan        chan RtEvent
+	rtEventChan      chan RtEvent
 	dispatcher       *ProcessDispatcher
 }
 
@@ -260,7 +257,6 @@ func (rt *Runtime) Bootstrap(ctx context.Context) error {
 
 	notifyAgent := &Notifier{}
 	notifyAgent.RegisterProcessComplete(rt.onProcessComplete)
-	//notifyAgent.RegisterProcessInternalRetry(rt.onProcessInternalRetry)
 	rt.dispatcher = NewProcessDispatcher(rt.name, notifyAgent, rt.db, rt.lg)
 	go func() {
 		rt.dispatcher.Bootstrap(ctx, rt.metaChan)
@@ -279,7 +275,7 @@ func (rt *Runtime) Submit(
 	if err != nil {
 		return "", err
 	}
-	dbMeta := database.ProcessTriggerObject{
+	meta := database.ProcessTriggerObject{
 		UUID:  uuid.New(),
 		User:  user,
 		Class: class.Raw(),
@@ -288,33 +284,47 @@ func (rt *Runtime) Submit(
 	}
 
 	//save it
-	err = rt.db.CreateProcessTrigger(ctx, &dbMeta)
+	err = rt.db.CreateProcessTrigger(ctx, &meta)
 	if err != nil {
 		return "", err
 	}
 
-	return dbMeta.UUID, nil
+	return meta.UUID, nil
 }
 
-func (rt *Runtime) Resume(ctx context.Context, uuid string) error {
-	processData, err := rt.db.GetInstance(ctx, uuid)
+func (rt *Runtime) submitTriggerEvent(ctx context.Context, id, event string) error {
+	processData, err := rt.db.GetProcess(ctx, id)
 	if err != nil {
 		return err
 	}
 	if processData == nil {
-		return errors.New("process instance not found: " + uuid)
+		return errors.New("process instance not found: " + id)
 	}
 
-	id, err := rt.db.CreateResumeProcessTrigger(ctx, processData.User, processData.Class, processData.Uuid)
+	meta := &database.ProcessTriggerObject{
+		UUID:  uuid.New(),
+		User:  processData.User,
+		Class: processData.Class,
+		Data:  processData.Storage,
+		Event: event,
+	}
+	err = rt.db.CreateProcessTrigger(ctx, meta)
 	if err == nil {
-		rt.lg.Info("process event submitted",
-			zap.String("uuid", processData.Uuid), zap.Int64("ID", id))
+		rt.lg.Info("process event submitted", zap.String("uuid", processData.Uuid))
 	}
 	return err
+
+}
+
+func (rt *Runtime) Retry(ctx context.Context, id string) error {
+	return rt.submitTriggerEvent(ctx, id, "Retry")
+}
+func (rt *Runtime) Rollback(ctx context.Context, id string) error {
+	return rt.submitTriggerEvent(ctx, id, "Rollback")
 }
 
 func (rt *Runtime) GetProcess(ctx context.Context, uuid string) (*Process, error) {
-	processData, err := rt.db.GetInstance(ctx, uuid)
+	processData, err := rt.db.GetProcess(ctx, uuid)
 	if err != nil {
 		return nil, err
 	}
@@ -394,13 +404,10 @@ func (rt *Runtime) iterate(ctx context.Context) error {
 				rt.errorCount = 0
 				rt.dispatch(ctx, metas)
 			}
-		case event := <-rt.eventChan:
-			rt.dealEvent(event)
+		case event := <-rt.rtEventChan:
+			rt.dealRtEvent(event)
 		}
 	}
-}
-
-func (rt *Runtime) dealEvent(event RtEvent) {
 }
 
 func (rt *Runtime) onLockAgentError(reason error) {
@@ -435,25 +442,30 @@ func (rt *Runtime) onLockAgentError(reason error) {
 
 func (rt *Runtime) onProcessComplete(item interface{}) {
 	meta := item.(*ProcessTrigger)
-	key := rt.getQueueName(meta)
-	rt.shapingManager.Commit(key, meta)
 
-	err := rt.db.DeleteProcessTrigger(rt.ctx, meta.uuid)
-	if err != nil {
-		rt.lg.Error("delete process meta failed", zap.Error(err))
+	event := &CompletionEvent{
+		meta: meta,
 	}
-	rt.forward()
-
-	////TODO send to eventChan and process by dispatch routine
-	//event := &CompletionEvent{}
-	//rt.eventChan <- event
+	rt.rtEventChan <- event
 }
 
-func (rt *Runtime) onProcessInternalRetry(item interface{}) {
-	//TODO send to eventChan and process by dispatch routine
-	meta := item.(*ProcessTrigger)
-	key := rt.getQueueName(meta)
-	rt.shapingManager.Rollback(key, meta)
+func (rt *Runtime) dealRtEvent(event RtEvent) {
+	switch event.(type) {
+	case *CompletionEvent:
+		e := event.(*CompletionEvent)
+		//meta := event.Payload().(*ProcessTrigger)
+		meta := e.meta
+		key := rt.getQueueName(meta)
+		rt.shapingManager.Commit(key, meta)
+
+		err := rt.db.DeleteProcessTrigger(rt.ctx, meta.uuid)
+		if err != nil {
+			rt.lg.Error("delete process meta failed", zap.Error(err))
+		}
+		rt.forward()
+	default:
+		rt.lg.Warn("unknown event in runtime internal")
+	}
 }
 
 func (rt *Runtime) dispatch(ctx context.Context, metas []*ProcessTrigger) {
@@ -504,7 +516,7 @@ func (rt *Runtime) getQueueName(meta *ProcessTrigger) string {
 func (rt *Runtime) forward() {
 	ctx := rt.ctx
 
-	metas := rt.shapingManager.PickOutAll()
+	metas := rt.shapingManager.PickOutAllFront()
 
 	for _, meta := range metas {
 		select {

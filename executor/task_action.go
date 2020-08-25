@@ -117,7 +117,7 @@ func (tc *taskController) onWaitRetry(eventCtx EventContext) EventType {
 }
 
 func (tc *taskController) onFailed(eventCtx EventContext) EventType {
-	tc.lgr.Warn("task failed", zap.Error(tc.model.err))
+	tc.lgr.WithOptions(zap.AddStacktrace(zap.FatalLevel)).Warn("task failed", zap.Error(tc.model.err))
 	return NoOp
 }
 

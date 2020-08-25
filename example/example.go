@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/pborman/uuid"
@@ -34,7 +35,7 @@ func SetupSignalHandler() (stopCh <-chan struct{}) {
 		<-c
 		close(stop)
 		<-c
-		time.Sleep(5 * time.Second)
+		time.Sleep(10 * time.Second)
 		os.Exit(1) // second signal. Exit directly.
 	}()
 
@@ -176,7 +177,15 @@ func registerMeshInstallJob(job *meshInstalling) {
 		Retryable:  true,
 		NewStorage: func() interface{} { return &InstallingStorage{} },
 		Tasks:      []TaskScheme{t1, t2},
-		OnFailure: func(ctx dandelion.Context) {
+		OnSuccess: func(ctx dandelion.Context) {
+			storage, err := json.Marshal(ctx.Global())
+			if err != nil {
+				log.Printf("serialize error: %v\n", err)
+			}
+			log.Printf("OnSuccess, storage: %s\n", string(storage))
+			panic("make trouble in `OnSuccess` callback")
+		},
+		OnFailed: func(ctx dandelion.Context) {
 			log.Printf("failure, storage:%v\n", ctx.Global())
 		},
 	}
@@ -230,8 +239,9 @@ func (mj *meshInstalling) SecondTask(ctx Context) error {
 	storage := ctx.Global().(*InstallingStorage)
 	log.Printf("SecondTask running, storage: %v, data: %v\n", storage, mj.Data)
 	mj.K8sSvc.GetCluster(storage.MeshName)
-	//time.Sleep(10 * time.Second)
-	//return fmt.Errorf("custom error in second")
-	panic("SecondTask panic")
+	time.Sleep(10 * time.Second)
+	//panic("SecondTask panic")
+	//return errors.New("SecondTask custom error")
+
 	return nil
 }

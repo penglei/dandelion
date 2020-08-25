@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -51,7 +52,10 @@ func safetyRun(ctx context.Context, fn func() error) <-chan error {
 		defer close(out)
 		defer func() {
 			if r := recover(); r != nil {
-				panic(fmt.Errorf("unexpected: %v", r))
+				select {
+				case <-ctx.Done():
+				case out <- errors.New(fmt.Sprintf("%v", r)):
+				}
 			}
 		}()
 		err := fn()
