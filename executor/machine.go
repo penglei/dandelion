@@ -2,7 +2,6 @@ package executor
 
 import (
 	"context"
-	"fmt"
 	"github.com/penglei/dandelion/fsm"
 	"github.com/penglei/dandelion/scheme"
 	"github.com/penglei/dandelion/util"
@@ -44,8 +43,6 @@ func (machine *processMachine) SetTaskState(taskScheme scheme.TaskScheme, persis
 			}
 		}
 	}
-
-	//TODO save task stats information
 }
 
 func (machine *processMachine) SaveTaskStateDetail(persistence fsm.Persistence, name string, taskErr *SortableError) error {
@@ -122,10 +119,12 @@ func (t *taskMachine) Restate(s TaskState) {
 
 func (t *taskMachine) Save(persistence fsm.Persistence) error {
 	t.parent.SetTaskState(t.scheme, persistence)
-	fmt.Printf("-------------------------------------------------------\n")
-	fmt.Printf("persistence: %v\n", persistence)
-	fmt.Printf("err: %+v\n", t.taskErr)
-	fmt.Printf("-------------------------------------------------------\n")
+	//fmt.Printf("-------------------------------------------------------\n")
+	//fmt.Printf("persistence: %v\n", persistence)
+	//fmt.Printf("err: %+v\n", t.taskErr)
+	//fmt.Printf("-------------------------------------------------------\n")
+
+	//TODO ignore this error?
 	err := t.parent.SaveTaskStateDetail(persistence, t.scheme.Name, t.taskErr)
 	return err
 }

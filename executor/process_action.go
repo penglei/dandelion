@@ -80,8 +80,8 @@ func (p *processController) onRunning(eventCtx EventContext) EventType {
 	}
 
 	if err != nil {
-		if err != fsm.ErrEventRejected {
-			panic("unrecognized error")
+		if err == fsm.ErrEventRejected {
+			panic("unrecognized Event, fsm can't progress by event: " + event)
 		}
 		p.lgr.Warn("process occurs an error", zap.Error(err))
 		return Fail

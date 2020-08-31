@@ -41,7 +41,7 @@ type Database interface {
 	LoadUncommittedTrigger(context.Context) ([]*ProcessTriggerObject, error)
 	CreateProcessTrigger(ctx context.Context, meta *ProcessTriggerObject) error
 	DeleteProcessTrigger(ctx context.Context, processUuid string) error
-	InitProcessInstanceOnce(ctx context.Context, data ProcessDataObject) error
+	InitProcessInstanceOnce(ctx context.Context, data ProcessDataObject) (created bool, err error)
 	GetProcess(ctx context.Context, id string) (*ProcessDataObject, error)
 	UpdateProcessContext(ctx context.Context, processData ProcessDataObject) error
 	UpdateProcessStat(ctx context.Context, processUuid string, mask util.BitMask) error

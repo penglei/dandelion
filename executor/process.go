@@ -13,13 +13,13 @@ type ProcessWorker struct {
 }
 
 func NewProcessWorker(
-	processId string,
+	processUuid string,
 	scheme *scheme.ProcessScheme,
 	exporter SnapshotExporter,
 	lgr *zap.Logger,
 ) *ProcessWorker {
 	instance := &processMachine{
-		id:       processId,
+		id:       processUuid,
 		scheme:   *scheme,
 		exporter: exporter,
 		state:    NewProcessState(),

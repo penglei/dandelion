@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/pborman/uuid"
 	"github.com/penglei/dandelion/scheme"
+	"github.com/penglei/dandelion/util"
 	"go.uber.org/zap"
 	"gotest.tools/assert"
 	"log"
@@ -15,6 +16,10 @@ import (
 type memorySnapshotExporter struct {
 	stores map[string]ProcessState
 	data   []byte
+}
+
+func (m *memorySnapshotExporter) WriteTaskDetail(processUuid string, taskName string, data TaskStateDetail, opts ...util.BitMask) error {
+	return nil
 }
 
 func (m *memorySnapshotExporter) WriteProcess(id string, snapshot ProcessState) error {

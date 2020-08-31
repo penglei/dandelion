@@ -84,7 +84,8 @@ func (de *DatabaseExporter) WriteTaskDetail(processUuid string, taskName string,
 		ErrorCode:   td.ErrorCode,
 		ErrorMsg:    td.ErrorMsg,
 	}
-	return de.db.CreateOrUpdateTaskDetail(ctx, data)
+	//fmt.Printf("WriteTaskDetail opts: %+v\n", opts)
+	return de.db.CreateOrUpdateTaskDetail(ctx, data, opts...)
 }
 
 var _ executor.SnapshotExporter = &DatabaseExporter{}
@@ -124,7 +125,7 @@ func (e *ProcessDispatcher) dispatch(ctx context.Context, meta *ProcessTrigger) 
 		// proc.Lock()
 		// defer proc.Unlock()
 
-		if dbErr := e.db.InitProcessInstanceOnce(ctx, database.ProcessDataObject{
+		if created, dbErr := e.db.InitProcessInstanceOnce(ctx, database.ProcessDataObject{
 			Uuid:      meta.uuid,
 			User:      meta.user,
 			Class:     meta.class.Raw(),
@@ -134,6 +135,13 @@ func (e *ProcessDispatcher) dispatch(ctx context.Context, meta *ProcessTrigger) 
 			lgr.Warn("call process initialize once failed", zap.Error(dbErr))
 			//TODO e.notifier.Redeliver(meta)
 			return
+		} else if created {
+			for _, t := range processScheme.Tasks {
+				err := exporter.WriteTaskDetail(id, t.Name, executor.TaskStateDetail{})
+				if err != nil {
+					lgr.Warn("init task detail stat error", zap.Error(err))
+				}
+			}
 		}
 
 		//delete trigger
