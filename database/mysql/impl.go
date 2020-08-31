@@ -32,16 +32,16 @@ func (ms *mysqlDatabase) LoadUncommittedTrigger(ctx context.Context) ([]*databas
 	return results, nil
 }
 
-func (ms *mysqlDatabase) GetProcess(ctx context.Context, uuid string) (*database.ProcessDataObject, error) {
+func (ms *mysqlDatabase) GetProcess(ctx context.Context, processUuid string) (*database.ProcessDataObject, error) {
 	tx, err := ms.db.Begin()
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	querySql := "SELECT id, storage, status, `state`, `user`, `class`, `uuid` FROM process WHERE uuid = ?"
+	querySql := "SELECT `storage`, `status`, `state`, `user`, `class`, `uuid` FROM process WHERE uuid = ?"
 	obj := &database.ProcessDataObject{}
-	err = tx.QueryRowContext(ctx, querySql, uuid).Scan(
+	err = tx.QueryRowContext(ctx, querySql, processUuid).Scan(
 		&obj.Storage,
 		&obj.Status,
 		&obj.State,
@@ -58,30 +58,19 @@ func (ms *mysqlDatabase) GetProcess(ctx context.Context, uuid string) (*database
 
 }
 
-func (ms *mysqlDatabase) UpsertProcessContext(ctx context.Context, data database.ProcessDataObject) error {
+func (ms *mysqlDatabase) UpdateProcessContext(ctx context.Context, data database.ProcessDataObject) error {
 	tx, err := ms.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	//{ insert
-	insertFieldsSql := "`uuid`, `status`, `storage`, `state`"
-	insertFieldsSqlPlaceHolder := "?, ?, ?, ?"
-	sqlArgs := []interface{}{data.Uuid, data.Status, data.Storage, data.State}
-	//}
-
 	//{ update
 	updateFieldsSql := "`status`=?, `storage`=?, `state`=?"
-	sqlArgs = append(sqlArgs, data.Status, data.Storage, data.State)
+	sqlArgs := []interface{}{data.Status, data.Storage, data.State}
 	//}
 
-	upsertSql := fmt.Sprintf(
-		"INSERT INTO process (%s) VALUES (%s) ON DUPLICATE KEY UPDATE %s",
-		insertFieldsSql,
-		insertFieldsSqlPlaceHolder,
-		updateFieldsSql,
-	)
+	upsertSql := fmt.Sprintf("UPDATE process SET %s", updateFieldsSql)
 	_, err = tx.ExecContext(ctx, upsertSql, sqlArgs...)
 	if err != nil {
 		return err
@@ -98,16 +87,22 @@ func (ms *mysqlDatabase) InitProcessInstanceOnce(ctx context.Context, data datab
 	defer tx.Rollback()
 
 	var id int64
-	querySql := "SELECT `id` FROM process WHERE uuid = ?"
+	querySql := "SELECT `id` FROM process WHERE uuid = ? FOR UPDATE" //or: LOCK IN SHARE MODE
 	err = tx.QueryRowContext(ctx, querySql, data.Uuid).Scan(&id)
 	if IsNoRowsError(err) {
-		createSql := "INSERT INTO process (`uuid`, `user`, `class`, `started_at`, `storage`, `state`) VALUES (?, ?, ?, NOW(), '', '')"
-		_, err = tx.ExecContext(ctx, createSql, data.Uuid, data.User, data.Class)
+		createSql := "INSERT INTO process(`uuid`, `user`, `class`, `latest_event`, `stage_committed`, `started_at`, `agent_name`, `storage`, `state`) VALUES (?, ?, ?, ?, 0, NOW(), ?, '', '')"
+		_, err = tx.ExecContext(ctx, createSql, data.Uuid, data.User, data.Class, data.Event, data.AgentName)
 		if err != nil {
 			return err
 		}
+		return tx.Commit()
+	}
+	if err != nil {
+		return err
 	}
 
+	updateSql := "UPDATE process SET `latest_event` = ?, `stage_committed`=0, `agent_name` = ? WHERE uuid = ? "
+	_, err = tx.ExecContext(ctx, updateSql, data.Event, data.Uuid, data.AgentName)
 	if err != nil {
 		return err
 	}
@@ -116,15 +111,15 @@ func (ms *mysqlDatabase) InitProcessInstanceOnce(ctx context.Context, data datab
 	return err
 }
 
-func (ms *mysqlDatabase) UpdateProcessStat(ctx context.Context, processUuid, agentName string, mask util.BitMask) error {
+func (ms *mysqlDatabase) UpdateProcessStat(ctx context.Context, processUuid string, mask util.BitMask) error {
 	tx, err := ms.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	updateFieldsSql := "`agent_name` = ?"
-	sqlArgs := []interface{}{agentName}
+	updateFieldsSql := "`stage_committed`=1"
+	sqlArgs := make([]interface{}, 0)
 
 	if mask.Has(util.ProcessSetStartStat) {
 		updateFieldsSql += ", `started_at` = NOW()"
@@ -160,55 +155,44 @@ func (ms *mysqlDatabase) SaveProcessStorage(ctx context.Context, id int64, data 
 	return tx.Commit()
 }
 
-func (ms *mysqlDatabase) UpsertTask(ctx context.Context, data database.TaskDataObject, opts util.BitMask) error {
+func (ms *mysqlDatabase) CreateOrUpdateTaskDetail(ctx context.Context, data database.TaskDataObject, opts ...util.BitMask) error {
 	tx, err := ms.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	//{insert
-	insertFieldsSql := "`process_id`, `name`, `status`"
-	insertFieldsSqlPlaceHolder := "?, ?, ?"
-	sqlArgs := []interface{}{data.ProcessID, data.Name, data.Status}
+	querySql := "select id from process_task where `process_uuid` = ? and `name` = ?"
 
-	if opts.Has(util.TaskSetError) {
-		insertFieldsSql += ", `err_code`"
-		insertFieldsSqlPlaceHolder += ", ?"
-		sqlArgs = append(sqlArgs, data.ErrorCode)
-
-		insertFieldsSql += ", `err_msg`"
-		insertFieldsSqlPlaceHolder += ", ?"
-		sqlArgs = append(sqlArgs, data.ErrorMsg)
+	err = tx.QueryRowContext(ctx, querySql, data.ProcessUuid, data.Name).Scan()
+	if IsNoRowsError(err) {
+		createSql := "INSERT INTO process_task(`process_uuid`, `name`, `status`, `err_code`, `err_msg`) VALUES (?,?,?,?,?)"
+		_, err = tx.ExecContext(ctx, createSql, data.ProcessUuid, data.Name, data.Status, data.ErrorCode, data.ErrorMsg)
+		if err != nil {
+			return err
+		}
+		return tx.Commit()
 	}
-	//}
-
-	//{update
-	updateFieldsSql := "`status`=? "
-	sqlArgs = append(sqlArgs, data.Status)
-
-	if opts.Has(util.TaskSetExecuted) {
-		updateFieldsSql += ", `started_at` = NOW(), `executed` = 1"
+	if err != nil {
+		return err
 	}
+	opt := util.CombineBitMasks(opts...)
 
-	if opts.Has(util.TaskSetError) {
-		updateFieldsSql += ", `err_msg` = ?, `err_code` = ?"
-		sqlArgs = append(sqlArgs, data.ErrorMsg, data.ErrorCode)
+	updateFieldsSql := "`status` = ?, `err_code`=?, `err_msg` = ?"
+	sqlArgs := []interface{}{data.Status, data.ErrorMsg, data.ErrorMsg}
+
+	if opt.Has(util.TaskSetStartStat) {
+		updateFieldsSql += ", `started_at` = NOW()"
 	}
 
-	if opts.Has(util.TaskSetFinishStat) {
+	if opt.Has(util.TaskSetEndStat) {
 		updateFieldsSql += ", `ended_at` = NOW()"
 	}
-	//}
 
-	upsertSql := fmt.Sprintf(
-		"INSERT INTO process_task (%s) VALUES (%s) ON DUPLICATE KEY UPDATE %s",
-		insertFieldsSql,
-		insertFieldsSqlPlaceHolder,
-		updateFieldsSql,
-	)
+	updateSql := fmt.Sprintf("UPDATE process_task SET %s WHERE process_uuid = ? and `name` = ?", updateFieldsSql)
+	sqlArgs = append(sqlArgs, data.ProcessUuid, data.Name)
 
-	_, err = tx.ExecContext(ctx, upsertSql, sqlArgs...)
+	_, err = tx.ExecContext(ctx, updateSql, sqlArgs)
 	if err != nil {
 		return err
 	}
@@ -223,7 +207,7 @@ func (ms *mysqlDatabase) CreateProcessTrigger(ctx context.Context, trigger *data
 	}
 	defer tx.Rollback()
 
-	insertSql := "INSERT INTO process_trigger (uuid, `user`, `class`, `data`, `event`) VALUES (?, ?, ?, ?, ?)"
+	insertSql := "INSERT INTO process_trigger (`uuid`, `user`, `class`, `data`, `event`) VALUES (?, ?, ?, ?, ?)"
 
 	result, err := tx.ExecContext(ctx, insertSql, trigger.UUID, trigger.User, trigger.Class, trigger.Data, trigger.Event)
 	if err != nil {
@@ -265,33 +249,9 @@ func (ms *mysqlDatabase) DeleteProcessTrigger(ctx context.Context, uuid string) 
 	return tx.Commit()
 }
 
-func (ms *mysqlDatabase) LoadTasks(ctx context.Context, id int64) ([]*database.TaskDataObject, error) {
-	querySql := "SELECT `name`, `status`, `executed` FROM process_task WHERE process_id = ?"
-	rows, err := ms.db.QueryContext(ctx, querySql, id)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	results := make([]*database.TaskDataObject, 0)
-	for rows.Next() {
-		td := &database.TaskDataObject{
-			ProcessID: id,
-		}
-		var executed int
-		if err := rows.Scan(&td.Name, &td.Status, &executed); err != nil {
-			return nil, err
-		}
-		td.Executed = executed == 1
-		results = append(results, td)
-	}
-
-	return results, nil
-}
-
-func (ms *mysqlDatabase) GetProcessTasks(ctx context.Context, uuid string) ([]*database.TaskDataObject, error) {
-	querySql := "SELECT a.`name`, a.`status`, a.`err_code`, a.`err_msg`, a.`started_at`, a.`ended_at` FROM process_task as a LEFT JOIN process as b ON a.process_id = b.id WHERE uuid = ?"
-	rows, err := ms.db.QueryContext(ctx, querySql, uuid)
+func (ms *mysqlDatabase) GetProcessTasks(ctx context.Context, processUuid string) ([]*database.TaskDataObject, error) {
+	querySql := "SELECT a.`name`, a.`status`, a.`err_code`, a.`err_msg`, a.`started_at`, a.`ended_at` FROM process_task as a LEFT JOIN process as b ON a.process_uuid = b.uuid WHERE uuid = ?"
+	rows, err := ms.db.QueryContext(ctx, querySql, processUuid)
 	if err != nil {
 		return nil, err
 	}

@@ -29,7 +29,7 @@ func (q *QueuedThrottle) MergeInto(queue Sequence) {
 	q.lastOffset = q.queue.Back().Value.(OrderedMeta).GetOffset()
 }
 
-func (q *QueuedThrottle) Commit(target OrderedMeta) {
+func (q *QueuedThrottle) Forward(target OrderedMeta) {
 
 	elem := q.queue.Front()
 	front := elem.Value.(OrderedMeta)

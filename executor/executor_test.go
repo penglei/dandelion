@@ -17,7 +17,7 @@ type memorySnapshotExporter struct {
 	data   []byte
 }
 
-func (m *memorySnapshotExporter) Write(id string, snapshot ProcessState) error {
+func (m *memorySnapshotExporter) WriteProcess(id string, snapshot ProcessState) error {
 	m.stores[id] = snapshot
 	storeBytes, err := json.Marshal(m.stores)
 	if err != nil {
@@ -28,7 +28,7 @@ func (m *memorySnapshotExporter) Write(id string, snapshot ProcessState) error {
 	return nil
 }
 
-func (m *memorySnapshotExporter) Read(id string) (*ProcessState, error) {
+func (m *memorySnapshotExporter) ReadProcess(id string) (*ProcessState, error) {
 	var a = m.stores[id]
 	return &a, nil
 }

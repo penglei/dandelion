@@ -23,6 +23,7 @@ func NewProcessWorker(
 		scheme:   *scheme,
 		exporter: exporter,
 		state:    NewProcessState(),
+		lgr:      lgr,
 	}
 
 	controller := NewProcessController(instance, lgr)

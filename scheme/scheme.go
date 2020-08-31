@@ -48,7 +48,6 @@ type ProcessScheme struct {
 	Name       ProcessClass
 	Retryable  bool // all tasks can be retried if it encountered error.
 	NewStorage func() interface{}
-	//Orchestration func() TaskSorting
 	Tasks      []TaskScheme
 	OnSuccess  func(Context)
 	OnFailed   func(Context)

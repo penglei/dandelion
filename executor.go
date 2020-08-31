@@ -22,7 +22,7 @@ type DatabaseExporter struct {
 	lgr      *zap.Logger
 }
 
-func (de *DatabaseExporter) Write(processId string, snapshot executor.ProcessState) error {
+func (de *DatabaseExporter) WriteProcess(processUuid string, snapshot executor.ProcessState) error {
 	ctx := context.Background()
 
 	storage := snapshot.Storage
@@ -38,22 +38,22 @@ func (de *DatabaseExporter) Write(processId string, snapshot executor.ProcessSta
 	}
 	currentStatus := snapshot.FsmPersistence.Current
 	data := database.ProcessDataObject{
-		Uuid:    processId,
+		Uuid:    processUuid,
 		Status:  currentStatus.String(),
 		State:   stateBytes,
 		Storage: storageBytes,
 	}
 
-	err = de.db.UpsertProcessContext(ctx, data)
+	err = de.db.UpdateProcessContext(ctx, data)
 	if err != nil {
 		de.lgr.Debug("saved snapshot: " + string(stateBytes))
 	}
 	return err
 }
 
-func (de *DatabaseExporter) Read(processId string) (*executor.ProcessState, error) {
+func (de *DatabaseExporter) ReadProcess(processUuid string) (*executor.ProcessState, error) {
 	ctx := context.Background()
-	processDataObject, err := de.db.GetProcess(ctx, processId)
+	processDataObject, err := de.db.GetProcess(ctx, processUuid)
 	if err != nil {
 		return nil, err
 	}
@@ -75,6 +75,18 @@ func (de *DatabaseExporter) Read(processId string) (*executor.ProcessState, erro
 	return state, nil
 }
 
+func (de *DatabaseExporter) WriteTaskDetail(processUuid string, taskName string, td executor.TaskStateDetail, opts ...util.BitMask) error {
+	ctx := context.Background()
+	data := database.TaskDataObject{
+		ProcessUuid: processUuid,
+		Name:        taskName,
+		Status:      td.Status,
+		ErrorCode:   td.ErrorCode,
+		ErrorMsg:    td.ErrorMsg,
+	}
+	return de.db.CreateOrUpdateTaskDetail(ctx, data)
+}
+
 var _ executor.SnapshotExporter = &DatabaseExporter{}
 
 type ProcessDispatcher struct {
@@ -92,30 +104,46 @@ func (e *ProcessDispatcher) dispatch(ctx context.Context, meta *ProcessTrigger) 
 		e.lgr.Error("can't resolve the process scheme", zap.Error(err))
 		return
 	}
-	exporter := &DatabaseExporter{
-		db:       e.db,
-		scheme:   processScheme,
-		lgr:      e.lgr,
-		metadata: processMetadata{User: meta.user},
-	}
 
 	lgr := e.lgr.WithOptions(zap.AddStacktrace(zap.FatalLevel)).
-		With(zap.String("processId", id),
+		With(zap.String("processUuid", id),
 			zap.String("name", processScheme.Name.Raw()))
 
-	proc := executor.NewProcessWorker(id, processScheme, exporter, lgr)
-
 	go func() {
+		exporter := &DatabaseExporter{
+			db:       e.db,
+			scheme:   processScheme,
+			lgr:      e.lgr,
+			metadata: processMetadata{User: meta.user},
+		}
+
+		proc := executor.NewProcessWorker(id, processScheme, exporter, lgr)
+
+		//TODO
+		//we need to lock the process and
+		// proc.Lock()
+		// defer proc.Unlock()
+
+		if dbErr := e.db.InitProcessInstanceOnce(ctx, database.ProcessDataObject{
+			Uuid:      meta.uuid,
+			User:      meta.user,
+			Class:     meta.class.Raw(),
+			Event:     meta.event,
+			AgentName: e.name,
+		}); dbErr != nil {
+			lgr.Warn("call process initialize once failed", zap.Error(dbErr))
+			//TODO e.notifier.Redeliver(meta)
+			return
+		}
+
+		//delete trigger
+		//we don't wait to acknowledge from queue, maybe it would deliver again and
+		//we needn't worry about it as the process has been locked for execution.
+		e.notifier.TriggerCommit(meta)
+
 		var err error
 		switch meta.event {
 		case "Run":
-			if err := e.db.InitProcessInstanceOnce(ctx, database.ProcessDataObject{
-				Uuid:  meta.uuid,
-				User:  meta.user,
-				Class: meta.class.Raw(),
-			}); err != nil {
-				lgr.Warn("call process initialize once failed", zap.Error(err))
-			}
 			storage := processScheme.NewStorage()
 			err = json.Unmarshal(meta.data, storage)
 			if err == nil {
@@ -133,9 +161,10 @@ func (e *ProcessDispatcher) dispatch(ctx context.Context, meta *ProcessTrigger) 
 		}
 		if err != nil {
 			panic(err) //unreachable!
+			return
 		}
 
-		if err := e.db.UpdateProcessStat(ctx, meta.uuid, e.name, util.ProcessSetCompleteStat); err != nil {
+		if err := e.db.UpdateProcessStat(ctx, meta.uuid, util.ProcessSetCompleteStat); err != nil {
 			lgr.Warn("save process statistic information failed", zap.Error(err))
 		}
 

@@ -2,14 +2,20 @@ package executor
 
 import (
 	"context"
+	"fmt"
 	"github.com/penglei/dandelion/fsm"
 	"github.com/penglei/dandelion/scheme"
+	"github.com/penglei/dandelion/util"
 	"go.uber.org/zap"
 )
 
 type SnapshotExporter interface {
-	Write(processId string, snapshot ProcessState) error
-	Read(processId string) (*ProcessState, error)
+	WriteProcess(processUuid string, snapshot ProcessState) error
+	ReadProcess(processUuid string) (*ProcessState, error)
+	WriteTaskDetail(processUuid string,
+		taskName string,
+		data TaskStateDetail,
+		opts ...util.BitMask) error
 }
 
 type processMachine struct {
@@ -19,9 +25,10 @@ type processMachine struct {
 	state    ProcessState
 	fsm      *fsm.StateMachine
 	initial  ProcessState
+	lgr      *zap.Logger
 }
 
-func (machine *processMachine) SaveTaskState(taskScheme scheme.TaskScheme, persistence fsm.Persistence) {
+func (machine *processMachine) SetTaskState(taskScheme scheme.TaskScheme, persistence fsm.Persistence) {
 	if !machine.state.IsCompensatingProgress {
 		for i, item := range machine.state.Executions {
 			if item.Name == taskScheme.Name {
@@ -37,6 +44,36 @@ func (machine *processMachine) SaveTaskState(taskScheme scheme.TaskScheme, persi
 			}
 		}
 	}
+
+	//TODO save task stats information
+}
+
+func (machine *processMachine) SaveTaskStateDetail(persistence fsm.Persistence, name string, taskErr *SortableError) error {
+	taskDetail := TaskStateDetail{
+		Status: persistence.Current.String(),
+	}
+	if taskErr != nil {
+		taskDetail.ErrorCode = taskErr.Code
+		taskDetail.ErrorMsg = taskErr.Error()
+	}
+	opt := util.TaskUpdateDefault
+	switch taskDetail.Status {
+	case "Successful", "Failed":
+		opt = util.TaskSetEndStat
+	default:
+	}
+
+	return machine.exporter.WriteTaskDetail(machine.id, name, taskDetail, opt)
+}
+
+func (machine *processMachine) InitTaskDetailOnce(taskScheme scheme.TaskScheme) {
+	taskDetail := TaskStateDetail{
+		Status: Running.String(),
+	}
+	err := machine.exporter.WriteTaskDetail(machine.id, taskScheme.Name, taskDetail, util.TaskSetStartStat)
+	if err != nil {
+		machine.lgr.Warn("init task detail failed", zap.Error(err))
+	}
 }
 
 func (machine *processMachine) Forward(ctx context.Context, event fsm.EventType) error {
@@ -51,7 +88,7 @@ func (machine *processMachine) BringOut(storage interface{}) error {
 
 //init
 func (machine *processMachine) Restate() error {
-	snapshot, err := machine.exporter.Read(machine.id)
+	snapshot, err := machine.exporter.ReadProcess(machine.id)
 	if err != nil {
 		return err
 	}
@@ -63,7 +100,7 @@ func (machine *processMachine) Restate() error {
 
 func (machine *processMachine) Save(persistence fsm.Persistence) error {
 	machine.state.FsmPersistence = persistence
-	return machine.exporter.Write(machine.id, machine.state)
+	return machine.exporter.WriteProcess(machine.id, machine.state)
 }
 
 // task
@@ -73,19 +110,24 @@ type taskMachine struct {
 	fsm     *fsm.StateMachine
 	parent  *processMachine
 	initial TaskState
-	err     error
+	taskErr *SortableError
 }
 
 //init
+
 func (t *taskMachine) Restate(s TaskState) {
 	t.initial = s
 	t.fsm.Restore(s.FsmPersistence)
 }
 
 func (t *taskMachine) Save(persistence fsm.Persistence) error {
-	t.parent.SaveTaskState(t.scheme, persistence)
-	//fmt.Printf("err: %+v\n", t.err)
-	return nil
+	t.parent.SetTaskState(t.scheme, persistence)
+	fmt.Printf("-------------------------------------------------------\n")
+	fmt.Printf("persistence: %v\n", persistence)
+	fmt.Printf("err: %+v\n", t.taskErr)
+	fmt.Printf("-------------------------------------------------------\n")
+	err := t.parent.SaveTaskStateDetail(persistence, t.scheme.Name, t.taskErr)
+	return err
 }
 
 func (t *taskMachine) Run(ctx context.Context) error {

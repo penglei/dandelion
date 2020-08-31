@@ -2,9 +2,8 @@ package util
 
 const (
 	TaskUpdateDefault BitMask = 1 << BitMask(iota)
-	TaskSetExecuted
-	TaskSetError
-	TaskSetFinishStat
+	TaskSetStartStat
+	TaskSetEndStat
 )
 
 const (

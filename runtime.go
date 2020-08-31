@@ -91,13 +91,13 @@ func (m *ShapingManager) PickOutAllFront() []*ProcessTrigger {
 	return metas
 }
 
-func (m *ShapingManager) Commit(key string, meta *ProcessTrigger) {
+func (m *ShapingManager) Forward(key string, meta *ProcessTrigger) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
 	q, ok := m.queues[key]
 	if ok {
-		q.Commit(meta)
+		q.Forward(meta)
 	}
 }
 
@@ -197,20 +197,15 @@ func WithDB(db *sql.DB) Option {
 	}
 }
 
-type RtEvent interface {
-	Payload() interface{}
-}
+type RtEvent interface{}
 
-//Runtime.onProcessComplete
 type CompletionEvent struct {
 	meta *ProcessTrigger
 }
 
-func (c *CompletionEvent) Payload() interface{} {
-	return c.meta
+type CommitEvent struct {
+	meta *ProcessTrigger
 }
-
-var _ RtEvent = &CompletionEvent{}
 
 type Runtime struct {
 	ctx              context.Context
@@ -257,6 +252,7 @@ func (rt *Runtime) Bootstrap(ctx context.Context) error {
 
 	notifyAgent := &Notifier{}
 	notifyAgent.RegisterProcessComplete(rt.onProcessComplete)
+	notifyAgent.RegisterTriggerCommit(rt.onTriggerCommit)
 	rt.dispatcher = NewProcessDispatcher(rt.name, notifyAgent, rt.db, rt.lg)
 	go func() {
 		rt.dispatcher.Bootstrap(ctx, rt.metaChan)
@@ -265,7 +261,7 @@ func (rt *Runtime) Bootstrap(ctx context.Context) error {
 	return nil
 }
 
-func (rt *Runtime) Submit(
+func (rt *Runtime) Run(
 	ctx context.Context,
 	user string,
 	class ProcessClass,
@@ -292,17 +288,17 @@ func (rt *Runtime) Submit(
 	return meta.UUID, nil
 }
 
-func (rt *Runtime) submitTriggerEvent(ctx context.Context, id, event string) error {
-	processData, err := rt.db.GetProcess(ctx, id)
+func (rt *Runtime) submitTriggerEvent(ctx context.Context, processUuid, event string) error {
+	processData, err := rt.db.GetProcess(ctx, processUuid)
 	if err != nil {
 		return err
 	}
 	if processData == nil {
-		return errors.New("process instance not found: " + id)
+		return errors.New("process instance not found: " + processUuid)
 	}
 
 	meta := &database.ProcessTriggerObject{
-		UUID:  uuid.New(),
+		UUID:  processUuid,
 		User:  processData.User,
 		Class: processData.Class,
 		Data:  processData.Storage,
@@ -310,7 +306,7 @@ func (rt *Runtime) submitTriggerEvent(ctx context.Context, id, event string) err
 	}
 	err = rt.db.CreateProcessTrigger(ctx, meta)
 	if err == nil {
-		rt.lg.Info("process event submitted", zap.String("uuid", processData.Uuid))
+		rt.lg.Info("process event submitted", zap.String("uuid", processUuid))
 	}
 	return err
 
@@ -323,8 +319,8 @@ func (rt *Runtime) Rollback(ctx context.Context, id string) error {
 	return rt.submitTriggerEvent(ctx, id, "Rollback")
 }
 
-func (rt *Runtime) GetProcess(ctx context.Context, uuid string) (*Process, error) {
-	processData, err := rt.db.GetProcess(ctx, uuid)
+func (rt *Runtime) GetProcess(ctx context.Context, processUuid string) (*Process, error) {
+	processData, err := rt.db.GetProcess(ctx, processUuid)
 	if err != nil {
 		return nil, err
 	}
@@ -348,8 +344,8 @@ func (rt *Runtime) GetProcess(ctx context.Context, uuid string) (*Process, error
 	return p, nil
 }
 
-func (rt *Runtime) GetProcessTasks(ctx context.Context, uuid string) ([]*Task, error) {
-	taskDataObjects, err := rt.db.GetProcessTasks(ctx, uuid)
+func (rt *Runtime) GetProcessTasks(ctx context.Context, processUuid string) ([]*Task, error) {
+	taskDataObjects, err := rt.db.GetProcessTasks(ctx, processUuid)
 	if err != nil {
 		return nil, err
 	}
@@ -441,28 +437,27 @@ func (rt *Runtime) onLockAgentError(reason error) {
 }
 
 func (rt *Runtime) onProcessComplete(item interface{}) {
-	meta := item.(*ProcessTrigger)
+	event := &CompletionEvent{meta: item.(*ProcessTrigger)}
+	rt.rtEventChan <- event
+}
 
-	event := &CompletionEvent{
-		meta: meta,
-	}
+func (rt *Runtime) onTriggerCommit(item interface{}) {
+	event := &CommitEvent{meta: item.(*ProcessTrigger)}
 	rt.rtEventChan <- event
 }
 
 func (rt *Runtime) dealRtEvent(event RtEvent) {
-	switch event.(type) {
+	switch e := event.(type) {
 	case *CompletionEvent:
-		e := event.(*CompletionEvent)
-		//meta := event.Payload().(*ProcessTrigger)
 		meta := e.meta
 		key := rt.getQueueName(meta)
-		rt.shapingManager.Commit(key, meta)
-
-		err := rt.db.DeleteProcessTrigger(rt.ctx, meta.uuid)
+		rt.shapingManager.Forward(key, meta)
+		rt.forward()
+	case *CommitEvent:
+		err := rt.db.DeleteProcessTrigger(rt.ctx, e.meta.uuid)
 		if err != nil {
 			rt.lg.Error("delete process meta failed", zap.Error(err))
 		}
-		rt.forward()
 	default:
 		rt.lg.Warn("unknown event in runtime internal")
 	}

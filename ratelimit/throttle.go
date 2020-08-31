@@ -7,7 +7,7 @@ type Sequence = *list.List
 type Shaper interface {
 	MergeInto(Sequence)
 	PickOutFront() []OrderedMeta
-	Commit(OrderedMeta)
+	Forward(OrderedMeta)
 }
 
 type OrderedMeta interface {

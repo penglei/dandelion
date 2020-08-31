@@ -109,7 +109,7 @@ func main() {
 			MeshTitle: "test mesh installing",
 		}
 		runtime := dandelion.NewDefaultRuntime("", db)
-		_, err = runtime.Submit(ctx, user, TestInstall, meshStorage)
+		_, err = runtime.Run(ctx, user, TestInstall, meshStorage)
 		//runtime.Find()
 		if err != nil {
 			panic(err)

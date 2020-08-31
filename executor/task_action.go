@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"context"
 	"fmt"
 	"go.uber.org/zap"
 	"runtime/debug"
@@ -9,7 +10,7 @@ import (
 
 type stateError struct {
 	value string
-	err   error
+	err   *SortableError
 }
 
 func (e *stateError) Error() string {
@@ -20,13 +21,10 @@ func (e *stateError) Error() string {
 }
 
 func (e *stateError) Unwrap() error {
-	if e.err != nil {
-		return e.err
-	}
-	return e
+	return e.err
 }
 
-func (e *stateError) WithDetail(err error) *stateError {
+func (e *stateError) WithDetail(err *SortableError) *stateError {
 	e.err = err
 	return e
 }
@@ -64,7 +62,7 @@ func (tc *taskController) onRunning(eventCtx EventContext) EventType {
 	processState := &tc.model.parent.state
 
 	taskInfo := tc.Info()
-	var routine = func() (err error) {
+	var routine = func(parentCtx context.Context) (err error) {
 		defer func() {
 			if r := recover(); r != nil {
 				err = fmt.Errorf("task(%s) panic on running: %v\n%s", taskInfo, r, debug.Stack())
@@ -72,24 +70,43 @@ func (tc *taskController) onRunning(eventCtx EventContext) EventType {
 		}()
 
 		//the context should be controlled by runtime instead of a root context
-		ctx := NewActionContext(eventCtx, processId, processState)
+		ctx := NewActionContext(parentCtx, processId, processState)
 		err = scheme.Task.Execute(ctx)
 		return err
 	}
 
-	taskRunningErr := interceptParentDone(eventCtx, func() error {
+	taskReturningErr := interceptParentDone(eventCtx, func() error {
 		if scheme.Timeout > 0 {
 			timeout := time.Duration(scheme.Timeout)
 			return timeoutWrapper(timeout*time.Second, routine)
 		} else {
-			return routine()
+			return routine(eventCtx)
 		}
 	})
 
 	var event EventType
-	if taskRunningErr != nil {
-		tc.model.err = taskRunningErr
-		switch taskRunningErr {
+	if taskReturningErr != nil {
+		var err = SortableError{Code: "Unknown"}
+		switch e := taskReturningErr.(type) {
+		case *stateError:
+			if e1 := e.Unwrap(); e1 != nil {
+				if e2, ok := e1.(*SortableError); ok {
+					err = *e2
+				} else {
+					err.Message = e1.Error()
+				}
+			} else {
+				err.Message = e.Error()
+			}
+		case *SortableError:
+			err = *e
+		default:
+			err.Code = "Unknown"
+			err.Message = e.Error()
+		}
+		tc.model.taskErr = &err
+
+		switch taskReturningErr {
 		case ErrInterrupt:
 			event = Interrupted
 		case ErrRetry:
@@ -117,7 +134,7 @@ func (tc *taskController) onWaitRetry(eventCtx EventContext) EventType {
 }
 
 func (tc *taskController) onFailed(eventCtx EventContext) EventType {
-	tc.lgr.WithOptions(zap.AddStacktrace(zap.FatalLevel)).Warn("task failed", zap.Error(tc.model.err))
+	tc.lgr.WithOptions(zap.AddStacktrace(zap.FatalLevel)).Warn("task failed", zap.Error(tc.model.taskErr))
 	return NoOp
 }
 
@@ -132,7 +149,7 @@ func (tc *taskController) onCompensating(eventCtx EventContext) EventType {
 	processState := &tc.model.parent.state
 
 	taskInfo := tc.Info()
-	var routine = func() (err error) {
+	var routine = func(parentCtx context.Context) (err error) {
 		defer func() {
 			if r := recover(); r != nil {
 				err = fmt.Errorf("task(%s) panic on compensating: %v\n%s", taskInfo, r, debug.Stack())
@@ -140,7 +157,7 @@ func (tc *taskController) onCompensating(eventCtx EventContext) EventType {
 		}()
 
 		//the context should be controlled by runtime instead of root context
-		ctx := NewActionContext(eventCtx, processId, processState)
+		ctx := NewActionContext(parentCtx, processId, processState)
 		err = scheme.Task.Compensate(ctx)
 		return err
 	}

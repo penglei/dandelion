@@ -37,16 +37,19 @@ func NewProcessState() ProcessState {
 	}
 }
 
-type SortableError interface {
-	Code() string
-	Error() string
+type SortableError struct {
+	Code    string
+	Message string
 }
 
-type TaskExecutionState struct {
-	RunningCount      int    `jons:"running_count"`
-	ErrorCode         string `json:"error_code"`
-	ErrorMessage      string `json:"error_message"`
-	CompensatingCount int    `json:"compensating_count"`
+func (e *SortableError) Error() string {
+	return e.Message
+}
+
+type TaskStateDetail struct {
+	Status      string
+	ErrorCode   string
+	ErrorMsg    string
 }
 
 //client visible context

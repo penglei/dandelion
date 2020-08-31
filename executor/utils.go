@@ -7,6 +7,7 @@ import (
 	"time"
 )
 
+//Deprecated
 func safetyRunDeprecated(done <-chan struct{}, fn func() error) <-chan error {
 	var out = make(chan error)
 
@@ -28,6 +29,7 @@ func safetyRunDeprecated(done <-chan struct{}, fn func() error) <-chan error {
 	return out
 }
 
+//Deprecated
 func timeoutWrapperDeprecated(d time.Duration, fn func() error) error {
 	done := make(chan struct{})
 	t := time.NewTimer(d)
@@ -46,7 +48,7 @@ func timeoutWrapperDeprecated(d time.Duration, fn func() error) error {
 	}
 }
 
-func safetyRun(ctx context.Context, fn func() error) <-chan error {
+func safetyRun(ctx context.Context, fn func(context.Context) error) <-chan error {
 	var out = make(chan error)
 	go func() {
 		defer close(out)
@@ -58,7 +60,7 @@ func safetyRun(ctx context.Context, fn func() error) <-chan error {
 				}
 			}
 		}()
-		err := fn()
+		err := fn(ctx)
 		select {
 		case <-ctx.Done():
 		case out <- err:
@@ -67,7 +69,7 @@ func safetyRun(ctx context.Context, fn func() error) <-chan error {
 	return out
 }
 
-func timeoutWrapper(d time.Duration, fn func() error) error {
+func timeoutWrapper(d time.Duration, fn func(context.Context) error) error {
 	timeoutCtx, cancel := context.WithTimeout(context.Background(), d)
 	defer cancel() // cancel the timer
 	out := safetyRun(timeoutCtx, fn)

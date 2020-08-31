@@ -42,6 +42,7 @@ func (p *processController) CurrentExecutionTask() *taskMachine {
 	taskScheme := p.model.scheme.Tasks[nextTaskIndex]
 	lgr := p.lgr.With(zap.String("taskName", taskScheme.Name))
 	taskInstance := NewTaskMachine(taskScheme, p.model, lgr)
+	p.model.InitTaskDetailOnce(taskScheme)
 	p.model.state.Executions = append(p.model.state.Executions, TaskState{
 		Name: taskScheme.Name,
 	})
@@ -109,8 +110,8 @@ func (p *processController) onEnd(eventCtx EventContext) EventType {
 }
 
 func (p *processController) runCallback(ctx context.Context, label string, cb func(scheme.Context)) {
-	out := safetyRun(ctx, func() error {
-		ctx := NewActionContext(ctx, p.model.id, &p.model.state)
+	out := safetyRun(ctx, func(parentCtx context.Context) error {
+		ctx := NewActionContext(parentCtx, p.model.id, &p.model.state)
 		cb(ctx)
 		return nil
 	})

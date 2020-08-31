@@ -8,12 +8,14 @@ import (
 )
 
 type ProcessDataObject struct {
-	Uuid    string
-	User    string
-	Class   string
-	Status  string
-	Storage []byte
-	State   []byte //all state
+	Uuid      string
+	User      string
+	Event     string
+	Class     string
+	Status    string
+	Storage   []byte
+	State     []byte //all state
+	AgentName string
 }
 
 type ProcessTriggerObject struct {
@@ -26,14 +28,13 @@ type ProcessTriggerObject struct {
 }
 
 type TaskDataObject struct {
-	ProcessID int64
-	Name      string
-	Status    string
-	ErrorCode string
-	ErrorMsg  string
-	Executed  bool
-	StartedAt *time.Time
-	EndedAt   *time.Time
+	ProcessUuid string
+	Name        string
+	Status      string
+	ErrorCode   string
+	ErrorMsg    string
+	StartedAt   *time.Time
+	EndedAt     *time.Time
 }
 
 type Database interface {
@@ -42,11 +43,8 @@ type Database interface {
 	DeleteProcessTrigger(ctx context.Context, processUuid string) error
 	InitProcessInstanceOnce(ctx context.Context, data ProcessDataObject) error
 	GetProcess(ctx context.Context, id string) (*ProcessDataObject, error)
-	UpsertProcessContext(ctx context.Context, processData ProcessDataObject) error
-	UpdateProcessStat(ctx context.Context, processUuid, agentName string, mask util.BitMask) error
-	//UpdateProcess(ctx context.Context, obj ProcessDataObject, agentName string, mask util.BitMask) error
-	//SaveProcessStorage(ctx context.Context, processId int64, data []byte) error
-	UpsertTask(ctx context.Context, taskData TaskDataObject, mask util.BitMask) error
-	//LoadTasks(ctx context.Context, processId int64) ([]*TaskDataObject, error)
+	UpdateProcessContext(ctx context.Context, processData ProcessDataObject) error
+	UpdateProcessStat(ctx context.Context, processUuid string, mask util.BitMask) error
+	CreateOrUpdateTaskDetail(ctx context.Context, data TaskDataObject, opts ...util.BitMask) error
 	GetProcessTasks(ctx context.Context, processId string) ([]*TaskDataObject, error)
 }
