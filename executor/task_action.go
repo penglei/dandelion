@@ -40,6 +40,28 @@ var ErrRetry = registerError("ErrorRetry")
 var ErrStop = registerError("ErrorStop")
 var ErrInterrupt = registerError("ErrorInterrupt")
 
+func parseTaskRunningErr(taskReturningErr error) *SortableError {
+	var err = SortableError{Code: "Unknown"}
+	switch e := taskReturningErr.(type) {
+	case *stateError:
+		if e1 := e.Unwrap(); e1 != nil {
+			if e2, ok := e1.(*SortableError); ok {
+				err = *e2
+			} else {
+				err.Message = e1.Error()
+			}
+		} else {
+			err.Message = e.Error()
+		}
+	case *SortableError:
+		err = *e
+	default:
+		err.Code = "Unknown"
+		err.Message = e.Error()
+	}
+	return &err
+}
+
 type taskController struct {
 	model *taskMachine
 	lgr   *zap.Logger
@@ -86,25 +108,9 @@ func (tc *taskController) onRunning(eventCtx EventContext) EventType {
 
 	var event EventType
 	if taskReturningErr != nil {
-		var err = SortableError{Code: "Unknown"}
-		switch e := taskReturningErr.(type) {
-		case *stateError:
-			if e1 := e.Unwrap(); e1 != nil {
-				if e2, ok := e1.(*SortableError); ok {
-					err = *e2
-				} else {
-					err.Message = e1.Error()
-				}
-			} else {
-				err.Message = e.Error()
-			}
-		case *SortableError:
-			err = *e
-		default:
-			err.Code = "Unknown"
-			err.Message = e.Error()
-		}
-		tc.model.taskErr = &err
+
+		//save error log
+		tc.model.taskErr = parseTaskRunningErr(taskReturningErr)
 
 		switch taskReturningErr {
 		case ErrInterrupt:
@@ -163,34 +169,23 @@ func (tc *taskController) onCompensating(eventCtx EventContext) EventType {
 	}
 
 	taskCompensatingErr := interceptParentDone(eventCtx, func() error {
-		return timeoutWrapper(10*time.Second, routine)
+		if scheme.Timeout > 0 {
+			timeout := time.Duration(scheme.Timeout)
+			return timeoutWrapper(timeout, routine)
+		} else {
+			return routine(eventCtx)
+		}
 	})
 
 	if taskCompensatingErr != nil {
-		switch taskCompensatingErr {
-		case ErrTimeout:
-			/*
-				if ctx.CompensatingCount < 3 {
-					ctx.CompensatingCount += 1
-					return Retry
-				} else {
-					return RollbackFail
-				}
-			*/
-			return RollbackFail
-		default:
-			return RollbackFail
-		}
+		//TODO save error
+		return RollbackFail
 	}
 	return Success
 }
 
 func (tc *taskController) onDirty(eventCtx EventContext) EventType {
 	//TODO reporting
-	return NoOp
-}
-
-func (tc *taskController) onEnd(eventCtx EventContext) EventType {
 	return NoOp
 }
 

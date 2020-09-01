@@ -160,7 +160,7 @@ func NewTaskMachine(
 	controller := NewTaskController(taskInstance, lgr)
 	taskFsm := NewTaskFSM(controller, taskInstance)
 
-	if parent.scheme.Retryable {
+	if parent.scheme.RetryAll {
 		taskFsm.States[Failed].Events[Retry] = Running
 	}
 

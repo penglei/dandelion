@@ -87,7 +87,7 @@ func registerTestProcess(name scheme.ProcessClass) {
 
 	processScheme := &scheme.ProcessScheme{
 		Name:       name,
-		Retryable:  true,
+		RetryAll:   true,
 		NewStorage: func() interface{} { return &appStorage{} },
 		Tasks:      []scheme.TaskScheme{t1, t2},
 		OnFailed: func(ctx scheme.Context) {

@@ -29,7 +29,7 @@ func NewProcessWorker(
 	controller := NewProcessController(instance, lgr)
 	processFsm := NewProcessFSM(controller, instance)
 
-	if scheme.Retryable {
+	if scheme.RetryAll {
 		processFsm.States[Failed].Events[Retry] = Running
 	}
 

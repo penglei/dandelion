@@ -168,7 +168,7 @@ func (e *ProcessDispatcher) dispatch(ctx context.Context, meta *ProcessTrigger) 
 			err = errors.New("unknown trigger event: " + meta.event)
 		}
 		if err != nil {
-			panic(err) //unreachable!
+			lgr.Warn("process fsm error", zap.Error(err), zap.String("event", meta.event))
 			return
 		}
 

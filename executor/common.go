@@ -22,19 +22,18 @@ const (
 	Successful             = "Successful"
 	Compensating           = "Compensating"
 	Reverted               = "Reverted"
-	InComplete             = "InComplete"
 	Dirty                  = "Dirty"
 )
 
 //events
 const (
-	Run          EventType = "Run"    //external
-	Resume                 = "Resume" //external *
+	Run          EventType = "Run"
+	Resume                 = "Resume"
 	WaitRetry              = "WaitRetry"
-	Retry                  = "Retry" //external
+	Retry                  = "Retry"
 	Success                = "Success"
 	Fail                   = "Fail"
-	Rollback               = "Rollback" //external
+	Rollback               = "Rollback"
 	RollbackFail           = "RollbackFail"
 )
 
@@ -42,7 +41,6 @@ type IActionHandle interface {
 	onInterrupted(eventCtx EventContext) EventType
 	onRunning(eventCtx EventContext) EventType
 	onWaitRetry(eventCtx EventContext) EventType
-	onEnd(eventCtx EventContext) EventType
 	onFailed(eventCtx EventContext) EventType
 	onSuccessful(eventCtx EventContext) EventType
 	onCompensating(eventCtx EventContext) EventType
@@ -77,27 +75,24 @@ func NewTaskFSM(action IActionHandle, store fsm.IStore) *fsm.StateMachine {
 			Retryable: State{
 				Action: ActionHandle(action.onWaitRetry),
 				Events: Events{
-					Retry:    Running,
-					Rollback: InComplete,
+					Retry: Running,
 				},
-			},
-			InComplete: State{
-				Action: ActionHandle(action.onEnd),
 			},
 			Successful: State{
 				Action: ActionHandle(action.onSuccessful),
+				Events: Events{
+					Rollback: Compensating,
+				},
 			},
 			Failed: State{
 				Action: ActionHandle(action.onFailed),
 				Events: Events{
-					Rollback: Compensating,
-					//Retry:    Running,
+					//Retry:    Running, //dynamic config
 				},
 			},
 			Compensating: State{
 				Action: ActionHandle(action.onCompensating),
 				Events: Events{
-					Retry:        Compensating,
 					RollbackFail: Dirty,
 					Success:      Reverted,
 				},
@@ -106,7 +101,7 @@ func NewTaskFSM(action IActionHandle, store fsm.IStore) *fsm.StateMachine {
 				Action: ActionHandle(action.onDirty),
 			},
 			Reverted: State{
-				Action: ActionHandle(action.onEnd),
+				Action: ActionHandle(action.onReverted),
 			},
 		},
 	}
@@ -140,12 +135,8 @@ func NewProcessFSM(controller IActionHandle, store fsm.IStore) *fsm.StateMachine
 			Retryable: State{
 				Action: ActionHandle(controller.onWaitRetry),
 				Events: Events{
-					Retry:    Running,
-					Rollback: InComplete,
+					Retry: Running,
 				},
-			},
-			InComplete: State{
-				Action: ActionHandle(controller.onEnd),
 			},
 			Successful: State{
 				Action: ActionHandle(controller.onSuccessful),
@@ -153,14 +144,14 @@ func NewProcessFSM(controller IActionHandle, store fsm.IStore) *fsm.StateMachine
 			Failed: State{
 				Action: ActionHandle(controller.onFailed),
 				Events: Events{
+					//Retry:    Running, //dynamic config
 					Rollback: Compensating,
-					//Retry:    Running,
 				},
 			},
 			Compensating: State{
 				Action: ActionHandle(controller.onCompensating),
 				Events: Events{
-					Retry:        Compensating,
+					Rollback:     Compensating,
 					RollbackFail: Dirty,
 					Success:      Reverted,
 				},

@@ -62,8 +62,34 @@ type MySQLOptions struct {
 
 const (
 	RoleProducer = 1 + iota
+	RoleRollback
 	RoleConsumer
 )
+
+func parseRole() int {
+	role := RoleProducer
+	if len(os.Args) >= 2 {
+		switch os.Args[1] {
+		case "consume":
+			role = RoleConsumer
+		case "rollback":
+			role = RoleRollback
+		}
+	}
+	return role
+}
+
+func parseUser() string {
+	user := "user_default"
+	if len(os.Args) >= 3 {
+		user = os.Args[2]
+	}
+	return user
+}
+
+func parseUuid() string {
+	return os.Args[2]
+}
 
 func main() {
 
@@ -85,32 +111,30 @@ func main() {
 		panic(err)
 	}
 
-	role := RoleProducer
-	if len(os.Args) >= 2 {
-		if os.Args[1] == "consume" {
-			role = RoleConsumer
-		}
-	}
 	conf := zap.NewDevelopmentConfig()
 	conf.Level = zap.NewAtomicLevelAt(zap.DebugLevel)
 	l, err := conf.Build()
 	zap.ReplaceGlobals(l)
 
+	role := parseRole()
 	switch role {
 	case RoleProducer:
 		ctx := context.Background()
-		//ctx, cancelFn := context.WithCancel(ctx)
-		user := "user_default"
-		if len(os.Args) >= 3 {
-			user = os.Args[2]
-		}
-
+		user := parseUser()
 		meshStorage := InstallingStorage{
 			MeshTitle: "test mesh installing",
 		}
 		runtime := dandelion.NewDefaultRuntime("", db)
 		_, err = runtime.Run(ctx, user, TestInstall, meshStorage)
 		//runtime.Find()
+		if err != nil {
+			panic(err)
+		}
+	case RoleRollback:
+		ctx := context.Background()
+		runtime := dandelion.NewDefaultRuntime("", db)
+		processUuid := parseUuid()
+		err = runtime.Rollback(ctx, processUuid)
 		if err != nil {
 			panic(err)
 		}
@@ -138,14 +162,14 @@ func main() {
 }
 
 func init() {
-	job := &meshInstalling{
+	installing := &meshInstalling{
 		Data: customData{
 			Foo: "some_config_here",
 			Bar: 123,
 		},
 		K8sSvc: NewFakeK8sService(),
 	}
-	registerMeshInstallJob(job)
+	registerExampleProcess(installing)
 }
 
 const (
@@ -162,19 +186,19 @@ type InstallingStorage struct {
 	ClusterName string `json:"clusterName,omitempty"`
 }
 
-func registerMeshInstallJob(job *meshInstalling) {
+func registerExampleProcess(installing *meshInstalling) {
 	t1 := TaskScheme{
 		Name: "first",
-		Task: TaskFn(job.FirstTask),
+		Task: installing.FirstTask(),
 	}
 	t2 := TaskScheme{
 		Name: "second",
-		Task: TaskFn(job.SecondTask),
+		Task: installing.SecondTask(),
 	}
 
 	installMeshProcess := &dandelion.ProcessScheme{
 		Name:       TestInstall,
-		Retryable:  true,
+		RetryAll:   true,
 		NewStorage: func() interface{} { return &InstallingStorage{} },
 		Tasks:      []TaskScheme{t1, t2},
 		OnSuccess: func(ctx dandelion.Context) {
@@ -223,25 +247,56 @@ type meshInstalling struct {
 	K8sSvc K8sService
 }
 
-func (mj *meshInstalling) FirstTask(ctx Context) error {
+type FirstTask struct {
+}
+
+func (f *FirstTask) Execute(ctx scheme.Context) error {
 	storage := ctx.Global().(*InstallingStorage)
 	meshName := "mesh-" + uuid.New()
 	storage.MeshName = meshName
-	log.Printf("FirstTask running, storage: %v, data: %v \n", storage, mj.Data)
-	mj.Data.Bar = 456
-	log.Printf("FirstTask set data: %v", mj.Data)
+
+	//log.Printf("FirstTask running, storage: %v, data: %v \n", storage, mj.Data)
+	//mj.Data.Bar = 456
+	//log.Printf("FirstTask set data: %v", mj.Data)
+
 	//panic("FirstTask panic!")
 	//time.Sleep(time.Second * 2)
 	return nil
 }
 
-func (mj *meshInstalling) SecondTask(ctx Context) error {
+func (f *FirstTask) Compensate(ctx scheme.Context) error {
+	log.Printf("calling FirstTask Compensate")
+	return nil
+}
+
+var _ scheme.TaskHandle = &FirstTask{}
+
+type SecondTask struct {
+}
+
+func (s *SecondTask) Execute(ctx scheme.Context) error {
 	storage := ctx.Global().(*InstallingStorage)
-	log.Printf("SecondTask running, storage: %v, data: %v\n", storage, mj.Data)
-	mj.K8sSvc.GetCluster(storage.MeshName)
-	time.Sleep(10 * time.Second)
-	//panic("SecondTask panic")
+	log.Printf("SecondTask running, storage: %v\n", storage)
+
+	// mj.K8sSvc.GetCluster(storage.MeshName)
+
+	panic("SecondTask panic")
 	//return errors.New("SecondTask custom error")
 
 	return nil
+}
+
+func (s *SecondTask) Compensate(ctx scheme.Context) error {
+	log.Printf("calling SecondTask Compensate (you shouldn't see this!!!)")
+	return nil
+}
+
+var _ scheme.TaskHandle = &SecondTask{}
+
+func (mj *meshInstalling) FirstTask() scheme.TaskHandle {
+	return &FirstTask{}
+}
+
+func (mj *meshInstalling) SecondTask() scheme.TaskHandle {
+	return &SecondTask{}
 }

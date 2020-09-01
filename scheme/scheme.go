@@ -46,7 +46,7 @@ func ClassFromRaw(s string) ProcessClass {
 
 type ProcessScheme struct {
 	Name       ProcessClass
-	Retryable  bool // all tasks can be retried if it encountered error.
+	RetryAll   bool // all tasks can be retried if it encountered an error.
 	NewStorage func() interface{}
 	Tasks      []TaskScheme
 	OnSuccess  func(Context)
