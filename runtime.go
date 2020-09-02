@@ -10,6 +10,7 @@ import (
 	"github.com/pborman/uuid"
 	"github.com/penglei/dandelion/database"
 	"github.com/penglei/dandelion/database/mysql"
+	"github.com/penglei/dandelion/executor"
 	"github.com/penglei/dandelion/ratelimit"
 	"github.com/penglei/dandelion/scheme"
 	"go.uber.org/zap"
@@ -241,6 +242,29 @@ func (rt *Runtime) Bootstrap(ctx context.Context) error {
 		return err
 	}
 
+	unfinishedProcesses, err := rt.db.LoadUnfinishedProcesses()
+	if err != nil {
+		return err
+	}
+	for _, obj := range unfinishedProcesses {
+		var event string
+		if obj.Status == executor.Interrupted {
+			event = "Resume"
+		} else {
+			event = "" //recovery from crash
+		}
+		trigger := &database.ProcessTriggerObject{
+			UUID:  obj.Uuid,
+			User:  obj.User,
+			Class: obj.Class,
+			Event: event,
+			Data:  []byte(""), //ignore data
+		}
+		if err := rt.db.CreateProcessTrigger(ctx, trigger); err != nil {
+			rt.lg.Warn("recovery unfinished process fail", zap.Error(err))
+		}
+	}
+
 	go func() {
 		err := rt.iterate(ctx)
 		if err != nil {
@@ -365,13 +389,13 @@ func (rt *Runtime) GetProcessTasks(ctx context.Context, processUuid string) ([]*
 }
 
 func (rt *Runtime) fetchAllFlyingProcesses(ctx context.Context) ([]*ProcessTrigger, error) {
-	objects, err := rt.db.LoadUncommittedTrigger(ctx)
+	triggers, err := rt.db.LoadTriggers(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	metas := make([]*ProcessTrigger, 0)
-	for _, obj := range objects {
+	for _, obj := range triggers {
 		metas = append(metas, &ProcessTrigger{
 			id:    obj.ID,
 			uuid:  obj.UUID,
@@ -381,12 +405,14 @@ func (rt *Runtime) fetchAllFlyingProcesses(ctx context.Context) ([]*ProcessTrigg
 			event: obj.Event,
 		})
 	}
+
 	return metas, nil
 }
 
 func (rt *Runtime) iterate(ctx context.Context) error {
 	ticker := time.NewTicker(rt.checkInterval)
 	defer ticker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():

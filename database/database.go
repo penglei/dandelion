@@ -38,7 +38,8 @@ type TaskDataObject struct {
 }
 
 type Database interface {
-	LoadUncommittedTrigger(context.Context) ([]*ProcessTriggerObject, error)
+	LoadTriggers(context.Context) ([]*ProcessTriggerObject, error)
+	LoadUnfinishedProcesses() ([]*ProcessDataObject, error)
 	CreateProcessTrigger(ctx context.Context, meta *ProcessTriggerObject) error
 	DeleteProcessTrigger(ctx context.Context, processUuid string) error
 	InitProcessInstanceOnce(ctx context.Context, data ProcessDataObject) (created bool, err error)

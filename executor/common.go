@@ -28,6 +28,7 @@ const (
 //events
 const (
 	Run          EventType = "Run"
+	Interrupt              = "Interrupt"
 	Resume                 = "Resume"
 	WaitRetry              = "WaitRetry"
 	Retry                  = "Retry"
@@ -68,6 +69,7 @@ func NewTaskFSM(action IActionHandle, store fsm.IStore) *fsm.StateMachine {
 				Action: ActionHandle(action.onRunning),
 				Events: Events{
 					Success:   Successful,
+					Interrupt: Interrupted,
 					Fail:      Failed,
 					WaitRetry: Retryable,
 				},
@@ -127,6 +129,7 @@ func NewProcessFSM(controller IActionHandle, store fsm.IStore) *fsm.StateMachine
 				Action: ActionHandle(controller.onRunning),
 				Events: Events{
 					Success:   Successful,
+					Interrupt: Interrupted,
 					Fail:      Failed,
 					WaitRetry: Retryable,
 					Run:       Running,

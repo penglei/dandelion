@@ -12,7 +12,7 @@ type mysqlDatabase struct {
 	db *sql.DB
 }
 
-func (ms *mysqlDatabase) LoadUncommittedTrigger(ctx context.Context) ([]*database.ProcessTriggerObject, error) {
+func (ms *mysqlDatabase) LoadTriggers(ctx context.Context) ([]*database.ProcessTriggerObject, error) {
 	querySql := "SELECT `id`, `uuid`, `user`, `class`, `data`, `event` FROM process_trigger WHERE `deleted_flag` = 0 ORDER BY `id`"
 	rows, err := ms.db.QueryContext(ctx, querySql)
 	if err != nil {
@@ -24,6 +24,34 @@ func (ms *mysqlDatabase) LoadUncommittedTrigger(ctx context.Context) ([]*databas
 	for rows.Next() {
 		obj := &database.ProcessTriggerObject{}
 		if err := rows.Scan(&obj.ID, &obj.UUID, &obj.User, &obj.Class, &obj.Data, &obj.Event); err != nil {
+			return nil, err
+		}
+		results = append(results, obj)
+	}
+
+	return results, nil
+}
+
+//case 1: system crashed accidentally, some processes should recovery
+//case 2 : system shutdown gracefully, maybe some task haven't finished and should be resumed.
+func (ms *mysqlDatabase) LoadUnfinishedProcesses() ([]*database.ProcessDataObject, error) {
+	tx, err := ms.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	querySql := "SELECT `status`, `state`, `user`, `class`, `uuid` FROM process WHERE stage_committed = 0 OR `status` = 'Interrupted'"
+	rows, err := tx.Query(querySql)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	results := make([]*database.ProcessDataObject, 0)
+	for rows.Next() {
+		obj := &database.ProcessDataObject{}
+		if err := rows.Scan(&obj.Status, &obj.State, &obj.User, &obj.Class, &obj.Uuid); err != nil {
 			return nil, err
 		}
 		results = append(results, obj)

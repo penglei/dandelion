@@ -52,6 +52,7 @@ func (p *processController) CurrentExecutionTask() *taskMachine {
 }
 
 func (p *processController) onInterrupted(eventCtx EventContext) EventType {
+	p.lgr.Info("process onInterrupted")
 	return NoOp
 }
 
@@ -74,6 +75,7 @@ func (p *processController) onRunning(eventCtx EventContext) EventType {
 	case Resume:
 		err = taskInstance.Resume(eventCtx)
 	default:
+		//XXX maybe we should recovery from outside?
 		err = taskInstance.Recovery(eventCtx)
 	}
 
@@ -86,13 +88,14 @@ func (p *processController) onRunning(eventCtx EventContext) EventType {
 		return Fail
 	}
 
+	p.lgr.Info("a task has completed", zap.String("task_status", taskInstance.fsm.Current.String()))
 	switch taskInstance.fsm.Current {
 	case Successful: //Next
 		return Run //taskInstance would update internal state
 	case Retryable:
 		return WaitRetry
-	//case Interrupted:
-	//	return Interrupted
+	case Interrupted:
+		return Interrupt
 	case Failed:
 		return Fail
 	default:

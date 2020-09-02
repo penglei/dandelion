@@ -44,12 +44,8 @@ func parseTaskRunningErr(taskReturningErr error) *SortableError {
 	var err = SortableError{Code: "Unknown"}
 	switch e := taskReturningErr.(type) {
 	case *stateError:
-		if e1 := e.Unwrap(); e1 != nil {
-			if e2, ok := e1.(*SortableError); ok {
-				err = *e2
-			} else {
-				err.Message = e1.Error()
-			}
+		if e.err != nil {
+			err = *e.err
 		} else {
 			err.Message = e.Error()
 		}
@@ -114,13 +110,10 @@ func (tc *taskController) onRunning(eventCtx EventContext) EventType {
 
 		switch taskReturningErr {
 		case ErrInterrupt:
-			event = Interrupted
+			event = Interrupt
 		case ErrRetry:
-			//TODO
-			//if task.WaitResume
+			//TODO limit retry
 			event = WaitRetry
-			//if task.WaitResume && runningCount <= task.MaxRetryCount
-			//event = Retry
 		default:
 			//ErrStop, ErrTimeout
 			event = Fail
@@ -132,6 +125,7 @@ func (tc *taskController) onRunning(eventCtx EventContext) EventType {
 }
 
 func (tc *taskController) onInterrupted(eventCtx EventContext) EventType {
+	tc.lgr.Info("onInterrupted")
 	return NoOp
 }
 
@@ -140,7 +134,7 @@ func (tc *taskController) onWaitRetry(eventCtx EventContext) EventType {
 }
 
 func (tc *taskController) onFailed(eventCtx EventContext) EventType {
-	tc.lgr.WithOptions(zap.AddStacktrace(zap.FatalLevel)).Warn("task failed", zap.Error(tc.model.taskErr))
+	tc.lgr.Warn("task onFailed", zap.Error(tc.model.taskErr))
 	return NoOp
 }
 
@@ -150,6 +144,7 @@ func (tc *taskController) onSuccessful(eventCtx EventContext) EventType {
 }
 
 func (tc *taskController) onCompensating(eventCtx EventContext) EventType {
+	tc.lgr.Info("task onCompensating")
 	scheme := tc.model.scheme
 	processId := tc.model.parent.id
 	processState := &tc.model.parent.state

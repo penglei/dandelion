@@ -157,7 +157,8 @@ func main() {
 			panic(err)
 		}
 		<-stopCh
-		//cancelFn()
+		//TODO
+		time.Sleep(10 * time.Second)
 	}
 }
 
@@ -207,7 +208,7 @@ func registerExampleProcess(installing *meshInstalling) {
 				log.Printf("serialize error: %v\n", err)
 			}
 			log.Printf("OnSuccess, storage: %s\n", string(storage))
-			panic("make trouble in `OnSuccess` callback")
+			//panic("make trouble in `OnSuccess` callback")
 		},
 		OnFailed: func(ctx dandelion.Context) {
 			log.Printf("failure, storage:%v\n", ctx.Global())
@@ -280,9 +281,17 @@ func (s *SecondTask) Execute(ctx scheme.Context) error {
 
 	// mj.K8sSvc.GetCluster(storage.MeshName)
 
-	panic("SecondTask panic")
+	//panic("SecondTask panic")
 	//return errors.New("SecondTask custom error")
 
+	ticker := time.NewTimer(20 * time.Second)
+	select {
+	case <-ticker.C:
+		log.Println("SecondTask Complete")
+	case <-ctx.Done():
+		log.Println("SecondTask cancelled")
+
+	}
 	return nil
 }
 

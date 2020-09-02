@@ -58,9 +58,7 @@ func (p *ProcessWorker) Recovery(ctx context.Context) error {
 	if err := p.instance.Restate(); err != nil {
 		return err
 	}
-
 	event := p.instance.state.FsmPersistence.NextEvent
-
 	err := p.instance.Forward(ctx, event)
 	return err
 }
@@ -74,7 +72,6 @@ func (p *ProcessWorker) Run(ctx context.Context, storage interface{}) error {
 }
 
 func (p *ProcessWorker) Resume(ctx context.Context) error {
-	//TODO compensating ?
 	return p.startSuspendProcess(ctx, Resume)
 }
 

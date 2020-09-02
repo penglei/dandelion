@@ -144,10 +144,10 @@ func (e *ProcessDispatcher) dispatch(ctx context.Context, meta *ProcessTrigger) 
 			}
 		}
 
-		//delete trigger
-		//we don't wait to acknowledge from queue, maybe it would deliver again and
-		//we needn't worry about it as the process has been locked for execution.
+		//we provide at least once semantics.
 		e.notifier.TriggerCommit(meta)
+
+		lgr.Info("process start")
 
 		var err error
 		switch meta.event {
@@ -157,13 +157,14 @@ func (e *ProcessDispatcher) dispatch(ctx context.Context, meta *ProcessTrigger) 
 			if err == nil {
 				err = proc.Run(ctx, storage)
 			}
-
 		case "Resume": //Interrupted
 			err = proc.Resume(ctx)
 		case "Retry":
 			err = proc.Retry(ctx)
 		case "Rollback":
 			err = proc.Rollback(ctx)
+		case "":
+			err = proc.Recovery(ctx)
 		default:
 			err = errors.New("unknown trigger event: " + meta.event)
 		}
@@ -172,10 +173,11 @@ func (e *ProcessDispatcher) dispatch(ctx context.Context, meta *ProcessTrigger) 
 			return
 		}
 
-		if err := e.db.UpdateProcessStat(ctx, meta.uuid, util.ProcessSetCompleteStat); err != nil {
+		if err := e.db.UpdateProcessStat(context.Background(), meta.uuid, util.ProcessSetCompleteStat); err != nil {
 			lgr.Warn("save process statistic information failed", zap.Error(err))
 		}
 
+		lgr.Info("process end")
 		e.notifier.TriggerComplete(meta)
 	}()
 
