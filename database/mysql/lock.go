@@ -236,20 +236,25 @@ func (m *mysqlLockImpl) checkLockConnAndDoHeartbeat(ctx context.Context) error {
 			}
 			m.lockersMutex.RUnlock()
 
-			//XXX maybe we should use another db connection
-			hbSql := "UPDATE lock_timer SET last_seen=NOW() WHERE `key` = ?"
-			stmt, err := m.db.PrepareContext(ctx, hbSql)
-			if err != nil {
-				return err
-			}
-			//TODO batch processing
-			for _, key := range lockerKeys {
-				_, err := stmt.ExecContext(ctx, key)
+			return func() error {
+				//XXX maybe we should use another db connection
+				hbSql := "UPDATE lock_timer SET last_seen=NOW() WHERE `key` = ?"
+				stmt, err := m.db.PrepareContext(ctx, hbSql)
 				if err != nil {
-					m.lg.Debug("renew lock last_seen", zap.String("key", key), zap.Error(err))
 					return err
 				}
-			}
+				defer stmt.Close()
+
+				//TODO batch processing
+				for _, key := range lockerKeys {
+					_, err := stmt.ExecContext(ctx, key)
+					if err != nil {
+						m.lg.Debug("renew lock last_seen", zap.String("key", key), zap.Error(err))
+						return err
+					}
+				}
+				return nil
+			}()
 
 		case <-ctx.Done():
 			return nil
