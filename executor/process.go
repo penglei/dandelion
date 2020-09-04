@@ -58,7 +58,7 @@ func (p *ProcessWorker) Recovery(ctx context.Context) error {
 	if err := p.instance.Restate(); err != nil {
 		return err
 	}
-	event := p.instance.state.FsmPersistence.NextEvent
+	event := p.instance.state.FsmPersistence.Event
 	err := p.instance.Forward(ctx, event)
 	return err
 }

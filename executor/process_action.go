@@ -88,7 +88,7 @@ func (p *processController) onRunning(eventCtx EventContext) EventType {
 		return Fail
 	}
 
-	p.lgr.Info("a task has completed", zap.String("task_status", taskInstance.fsm.Current.String()))
+	p.lgr.Info("a task has completed", zap.String("task_name", taskInstance.scheme.Name), zap.String("task_status", taskInstance.fsm.Current.String()))
 	switch taskInstance.fsm.Current {
 	case Successful: //Next
 		return Run //taskInstance would update internal state
@@ -147,6 +147,9 @@ func (p *processController) CurrentCompensationTask() *taskMachine {
 	//TODO optimize
 	for i := 0; i < len(executions); i += 1 {
 		if executions[i].FsmPersistence.Current == Failed {
+			if p.model.scheme.Tasks[i].ForceCompensation {
+				execLen += 1
+			}
 			break
 		} else {
 			execLen += 1
@@ -229,6 +232,10 @@ func (p *processController) onDirty(eventCtx EventContext) EventType {
 }
 
 func (p *processController) onReverted(eventCtx EventContext) EventType {
+	p.lgr.Info("process onReverted")
+	if p.model.scheme.OnReverted != nil {
+		p.runCallback(eventCtx, "OnReverted", p.model.scheme.OnReverted)
+	}
 	return NoOp
 }
 

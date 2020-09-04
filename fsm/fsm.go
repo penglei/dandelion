@@ -62,9 +62,9 @@ type State struct {
 type States map[StateType]State
 
 type Persistence struct {
-	Previous  StateType
-	Current   StateType
-	NextEvent EventType
+	Last    StateType
+	Current StateType
+	Event   EventType
 }
 
 type IStore interface {
@@ -101,8 +101,7 @@ func (s *StateMachine) getNextState(event EventType) (StateType, error) {
 }
 
 func (s *StateMachine) Restore(persistence Persistence) {
-	s.Previous = persistence.Previous
-	s.Current = persistence.Current
+	s.Current = persistence.Last
 }
 
 // SendEvent sends an event to the state machine.
@@ -126,11 +125,20 @@ func (s *StateMachine) SendEvent(event EventType, ctx context.Context) error {
 		if !ok || state.Action == nil {
 			// configuration error
 		}
+		//save fsm
+		persistence := Persistence{
+			Current: nextState,
+
+			Last:  s.Current,
+			Event: event,
+		}
+		if err = s.Store.Save(persistence); err != nil {
+			return err
+		}
 
 		// Transition over to the next state.
 		s.Previous = s.Current
 		s.Current = nextState
-
 		eventCtx := EventContext{
 			Context: ctx,
 			Event:   event,
@@ -138,16 +146,6 @@ func (s *StateMachine) SendEvent(event EventType, ctx context.Context) error {
 		// Execute the next state's action and loop over again if the event returned
 		// is not a no-op.
 		nextEvent := state.Action.Execute(eventCtx)
-
-		//save fsm
-		persistence := Persistence{
-			Previous:  s.Previous,
-			Current:   s.Current,
-			NextEvent: nextEvent,
-		}
-		if err = s.Store.Save(persistence); err != nil {
-			return err
-		}
 
 		if nextEvent == NoOp {
 			return nil

@@ -142,7 +142,7 @@ func (t *taskMachine) Rollback(ctx context.Context) error {
 	return t.fsm.SendEvent(Rollback, ctx)
 }
 func (t *taskMachine) Recovery(ctx context.Context) error {
-	nextEvent := t.initial.FsmPersistence.NextEvent
+	nextEvent := t.initial.FsmPersistence.Event
 	return t.fsm.SendEvent(nextEvent, ctx)
 }
 

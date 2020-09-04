@@ -261,7 +261,7 @@ func (f *FirstTask) Execute(ctx scheme.Context) error {
 	//log.Printf("FirstTask set data: %v", mj.Data)
 
 	//panic("FirstTask panic!")
-	//time.Sleep(time.Second * 2)
+	time.Sleep(time.Second * 1)
 	return nil
 }
 
@@ -284,7 +284,7 @@ func (s *SecondTask) Execute(ctx scheme.Context) error {
 	//panic("SecondTask panic")
 	//return errors.New("SecondTask custom error")
 
-	ticker := time.NewTimer(20 * time.Second)
+	ticker := time.NewTimer(1 * time.Second)
 	select {
 	case <-ticker.C:
 		log.Println("SecondTask Complete")

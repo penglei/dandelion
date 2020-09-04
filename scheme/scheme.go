@@ -29,9 +29,10 @@ func (t TaskFn) Compensate(ctx Context) error {
 }
 
 type TaskScheme struct {
-	Name    string
-	Task    TaskHandle
-	Timeout int //seconds
+	Name              string
+	Task              TaskHandle
+	Timeout           int //seconds
+	ForceCompensation bool
 }
 
 type ProcessClass string
@@ -50,6 +51,7 @@ type ProcessScheme struct {
 	NewStorage func() interface{}
 	Tasks      []TaskScheme
 	OnSuccess  func(Context)
+	OnReverted func(Context)
 	OnFailed   func(Context)
 	namedTasks map[string]TaskScheme
 }

@@ -174,6 +174,7 @@ func (tc *taskController) onCompensating(eventCtx EventContext) EventType {
 
 	if taskCompensatingErr != nil {
 		//TODO save error
+		tc.lgr.Warn("task compensation error", zap.Error(taskCompensatingErr))
 		return RollbackFail
 	}
 	return Success
