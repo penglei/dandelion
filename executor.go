@@ -121,7 +121,7 @@ func (e *ProcessDispatcher) dispatch(ctx context.Context, meta *ProcessTrigger) 
 		proc := executor.NewProcessWorker(id, processScheme, exporter, lgr)
 
 		//TODO
-		//we need to lock the process and
+		//we need to lock the process
 		// proc.Lock()
 		// defer proc.Unlock()
 

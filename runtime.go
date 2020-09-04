@@ -330,7 +330,7 @@ func (rt *Runtime) submitTriggerEvent(ctx context.Context, processUuid, event st
 	}
 	err = rt.db.CreateProcessTrigger(ctx, meta)
 	if err == nil {
-		rt.lg.Info("process event submitted", zap.String("uuid", processUuid))
+		rt.lg.Info("process event submitted", zap.String("uuid", processUuid), zap.String("event", event))
 	}
 	return err
 

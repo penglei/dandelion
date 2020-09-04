@@ -221,7 +221,7 @@ func (m *mysqlLockImpl) checkLockConnAndDoHeartbeat(ctx context.Context) error {
 	for {
 		select {
 		case <-ticker.C:
-
+			m.lg.Info("detecting lock connection")
 			if err := m.db.PingContext(ctx); err != nil {
 				return err
 			}
@@ -236,7 +236,7 @@ func (m *mysqlLockImpl) checkLockConnAndDoHeartbeat(ctx context.Context) error {
 			}
 			m.lockersMutex.RUnlock()
 
-			return func() error {
+			err := func() error {
 				//XXX maybe we should use another db connection
 				hbSql := "UPDATE lock_timer SET last_seen=NOW() WHERE `key` = ?"
 				stmt, err := m.db.PrepareContext(ctx, hbSql)
@@ -255,6 +255,9 @@ func (m *mysqlLockImpl) checkLockConnAndDoHeartbeat(ctx context.Context) error {
 				}
 				return nil
 			}()
+			if err != nil {
+				return err
+			}
 
 		case <-ctx.Done():
 			return nil
@@ -282,10 +285,10 @@ func (m *mysqlLockImpl) Bootstrap(ctx context.Context, connErrCallback func(err 
 		err := m.checkLockConnAndDoHeartbeat(ctx)
 
 		if err != nil {
+			m.lg.Warn("locker checking exit accidentally", zap.Error(err))
 			if err := m.conn.Close(); err != nil {
 				m.lg.Error("close lock agent connection error", zap.Error(err))
 			}
-			m.lg.Warn("locker checking exit accidentally", zap.Error(err))
 			connErrCallback(err)
 		}
 	}()
@@ -297,7 +300,7 @@ func BuildMySQLLockAgent(db *sql.DB, lg *zap.Logger, agentName string, hbInterva
 	//XXX how to rebuilt if lock connection closed ?
 
 	ctx := context.Background()
-	db.SetConnMaxLifetime(0) //keep connection
+	//db.SetConnMaxLifetime(0) //keep connection
 	conn, err := db.Conn(ctx)
 	if err != nil {
 		return nil, err

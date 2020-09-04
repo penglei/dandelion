@@ -94,13 +94,13 @@ func parseUuid() string {
 func main() {
 
 	m := MySQLOptions{
-		Host:     "127.0.0.1",
+		Host:     "192.168.50.10",
 		Port:     3306,
 		Username: "root",
-		Password: "",
+		Password: "123456",
 		Name:     "tke_mesh_trial",
 	}
-	userInfo := m.Username
+	userInfo := fmt.Sprintf("%s:%s", m.Username, m.Password)
 	//var dsn = fmt.Sprintf("%s@tcp(%s:%d)/%s?charset=%s&parseTime=True&loc=UTC&time_zone=%s", userInfo, m.Host, m.Port, m.Name, m.Charset, url.QueryEscape(`"+00:00"`))
 
 	dsn := fmt.Sprintf("%s@tcp(%s:%d)/%s?parseTime=true&charset=utf8mb4", userInfo, m.Host, m.Port, m.Name)
@@ -284,7 +284,7 @@ func (s *SecondTask) Execute(ctx scheme.Context) error {
 	//panic("SecondTask panic")
 	//return errors.New("SecondTask custom error")
 
-	ticker := time.NewTimer(1 * time.Second)
+	ticker := time.NewTimer(5 * time.Second)
 	select {
 	case <-ticker.C:
 		log.Println("SecondTask Complete")

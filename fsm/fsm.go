@@ -125,7 +125,9 @@ func (s *StateMachine) SendEvent(event EventType, ctx context.Context) error {
 		if !ok || state.Action == nil {
 			// configuration error
 		}
+
 		//save fsm
+		//TODO should be in a transaction
 		persistence := Persistence{
 			Current: nextState,
 
@@ -148,8 +150,16 @@ func (s *StateMachine) SendEvent(event EventType, ctx context.Context) error {
 		nextEvent := state.Action.Execute(eventCtx)
 
 		if nextEvent == NoOp {
+			if err = s.Store.Save(Persistence{
+				Current: s.Current,
+				Last:    s.Current,
+				Event:   nextEvent,
+			}); err != nil {
+				return err
+			}
 			return nil
 		}
+		//TODO commit transaction
 		event = nextEvent
 	}
 }
