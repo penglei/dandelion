@@ -18,10 +18,10 @@ CREATE TABLE process_trigger
     `event`        CHAR(32)   NOT NULL DEFAULT '',
     `created_at`   TIMESTAMP  NOT NULL DEFAULT NOW(),
     `deleted_at`   TIMESTAMP,
-    `deleted_flag` BIGINT(11) NOT NULL DEFAULT 0, -- TODO not implement
+    `deleted_flag` BIGINT(11) NOT NULL DEFAULT 0,
     PRIMARY KEY (`id`),
     KEY `idx_user_class_queue` (`user`, `class`),
-    UNIQUE KEY `idx_unique_process` (`uuid`)
+    UNIQUE KEY `idx_unique_process` (`uuid`, `deleted_flag`)
 )
     AUTO_INCREMENT = 1
     DEFAULT CHARSET = utf8mb4;

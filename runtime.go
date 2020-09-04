@@ -419,6 +419,7 @@ func (rt *Runtime) iterate(ctx context.Context) error {
 			return nil
 		case <-ticker.C:
 			metas, err := rt.fetchAllFlyingProcesses(ctx)
+			//rt.lg.Debug("fetchAllFlyingProcesses", zap.Int("count", len(metas)))
 			if err != nil {
 				rt.errorCount += 1
 				rt.lg.Warn("pull process meta error", zap.Error(err), zap.Int("errorCount", rt.errorCount))
@@ -538,6 +539,8 @@ func (rt *Runtime) forward() {
 	ctx := rt.ctx
 
 	metas := rt.shapingManager.PickOutAllFront()
+
+	//rt.lg.Debug("PickOutAllFront", zap.Int("count", len(metas)))
 
 	for _, meta := range metas {
 		select {

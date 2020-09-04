@@ -271,18 +271,11 @@ func (ms *mysqlDatabase) DeleteProcessTrigger(ctx context.Context, uuid string) 
 	}
 	defer tx.Rollback()
 
-	deleteSql := "DELETE FROM process_trigger WHERE uuid = ?"
+	softDeletionSql := "UPDATE process_trigger SET deleted_at = now(), deleted_flag = id WHERE uuid = ?"
 
-	result, err := tx.ExecContext(ctx, deleteSql, uuid)
+	_, err = tx.ExecContext(ctx, softDeletionSql, uuid)
 	if err != nil {
 		return err
-	}
-	cnt, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if cnt != 1 {
-		return fmt.Errorf("delete event but it doesn't exit: %s", uuid)
 	}
 	return tx.Commit()
 }

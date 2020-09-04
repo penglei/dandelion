@@ -129,7 +129,6 @@ func (e *ProcessDispatcher) dispatch(ctx context.Context, meta *ProcessTrigger) 
 			Uuid:      meta.uuid,
 			User:      meta.user,
 			Class:     meta.class.Raw(),
-			Event:     meta.event,
 			AgentName: e.name,
 		}); dbErr != nil {
 			lgr.Warn("call process initialize once failed", zap.Error(dbErr))
