@@ -90,6 +90,7 @@ func NewTaskFSM(action IActionHandle, store fsm.IStore) *fsm.StateMachine {
 				Action: ActionHandle(action.onFailed),
 				Events: Events{
 					//Retry:    Running, //dynamic config
+					Rollback: Compensating, //TODO config by scheme!
 				},
 			},
 			Compensating: State{
