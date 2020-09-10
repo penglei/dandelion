@@ -10,7 +10,6 @@ type Context interface {
 	context.Context
 	ProcessId() string
 	Global() interface{} //Get process storage
-	//Save() error
 }
 
 type TaskHandle interface {

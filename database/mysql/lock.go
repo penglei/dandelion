@@ -221,8 +221,8 @@ func (m *mysqlLockImpl) checkLockConnAndDoHeartbeat(ctx context.Context) error {
 	for {
 		select {
 		case <-ticker.C:
-			//m.lg.Info("detecting lock connection")
-			if err := m.db.PingContext(ctx); err != nil {
+			m.lg.Info("detecting lock connection")
+			if err := m.conn.PingContext(ctx); err != nil {
 				return err
 			}
 			m.lockersMutex.RLock()
@@ -237,7 +237,6 @@ func (m *mysqlLockImpl) checkLockConnAndDoHeartbeat(ctx context.Context) error {
 			m.lockersMutex.RUnlock()
 
 			err := func() error {
-				//XXX maybe we should use another db connection
 				hbSql := "UPDATE lock_timer SET last_seen=NOW() WHERE `key` = ?"
 				stmt, err := m.db.PrepareContext(ctx, hbSql)
 				if err != nil {

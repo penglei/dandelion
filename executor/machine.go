@@ -111,7 +111,6 @@ type taskMachine struct {
 }
 
 //init
-
 func (t *taskMachine) Restate(s TaskState) {
 	t.initial = s
 	t.fsm.Restore(s.FsmPersistence)

@@ -47,9 +47,9 @@ func (e *SortableError) Error() string {
 }
 
 type TaskStateDetail struct {
-	Status      string
-	ErrorCode   string
-	ErrorMsg    string
+	Status    string
+	ErrorCode string
+	ErrorMsg  string
 }
 
 //client visible context
