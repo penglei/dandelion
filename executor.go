@@ -120,11 +120,6 @@ func (e *ProcessDispatcher) dispatch(ctx context.Context, meta *ProcessTrigger) 
 
 		proc := executor.NewProcessWorker(id, processScheme, exporter, lgr)
 
-		//TODO
-		//we need to lock the process
-		// proc.Lock()
-		// defer proc.Unlock()
-
 		if created, dbErr := e.db.InitProcessInstanceOnce(ctx, database.ProcessDataObject{
 			Uuid:      meta.uuid,
 			User:      meta.user,
@@ -143,8 +138,17 @@ func (e *ProcessDispatcher) dispatch(ctx context.Context, meta *ProcessTrigger) 
 			}
 		}
 
-		//we provide at least once semantics.
+		//we provide at most once semantics.
 		e.notifier.TriggerCommit(meta)
+
+		//TODO
+		//we need to lock the process
+		/*
+			if !proc.Lock() {
+				return
+			}
+			defer proc.Unlock()
+		*/
 
 		lgr.Info("process start")
 

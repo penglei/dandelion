@@ -17,7 +17,7 @@ CREATE TABLE process_trigger
     `data`         TEXT       NOT NULL,
     `event`        CHAR(32)   NOT NULL DEFAULT '',
     `created_at`   TIMESTAMP  NOT NULL DEFAULT NOW(),
-    `deleted_at`   TIMESTAMP,
+    `deleted_at`   TIMESTAMP  NOT NULL DEFAULT 0,
     `deleted_flag` BIGINT(11) NOT NULL DEFAULT 0,
     PRIMARY KEY (`id`),
     KEY `idx_user_class_queue` (`user`, `class`),
@@ -50,8 +50,8 @@ CREATE TABLE process
     `storage`         TEXT       NOT NULL,
     `status`          CHAR(16)   NOT NULL DEFAULT '',
     `state`           TEXT       NOT NULL,
-    `started_at`      TIMESTAMP,
-    `ended_at`        TIMESTAMP,
+    `started_at`      TIMESTAMP  NOT NULL DEFAULT 0,
+    `ended_at`        TIMESTAMP  NOT NULL DEFAULT 0,
     `agent_name`      CHAR(32)   NOT NULL DEFAULT '', -- the last agent which executes process
     `created_at`      TIMESTAMP  NOT NULL DEFAULT NOW(),
     UNIQUE KEY `idx_unique_uuid` (`uuid`),
@@ -68,20 +68,11 @@ CREATE TABLE process_task
     `status`       CHAR(16)      NOT NULL DEFAULT '',
     `err_code`     VARCHAR(32)   NOT NULL DEFAULT '',
     `err_msg`      VARCHAR(8192) NOT NULL DEFAULT '',
-    `started_at`   TIMESTAMP,
-    `ended_at`     TIMESTAMP,
+    `started_at`   TIMESTAMP     NOT NULL DEFAULT 0,
+    `ended_at`     TIMESTAMP     NOT NULL DEFAULT 0,
     `created_at`   TIMESTAMP     NOT NULL DEFAULT NOW(),
     UNIQUE KEY `idx_unique_process_task` (`process_uuid`, `name`),
     PRIMARY KEY (`id`)
 )
     AUTO_INCREMENT = 1
     DEFAULT CHARSET = utf8mb4;
-
--- CREATE TABLE user_limit (
---     `id`                BIGINT(11)  NOT NULL AUTO_INCREMENT,
---     `user`            CHAR(32) NOT NULL DEFAULT '',
---     `concurrency`   SMALLINT(5) NOT NULL DEFAULT 2,
--- )
---     AUTO_INCREMENT = 1
---     DEFAULT CHARSET = utf8mb4;
--- 
