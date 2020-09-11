@@ -98,7 +98,8 @@ func (ms *mysqlDatabase) UpdateProcessContext(ctx context.Context, data database
 	sqlArgs := []interface{}{data.Status, data.Storage, data.State}
 	//}
 
-	upsertSql := fmt.Sprintf("UPDATE process SET %s", updateFieldsSql)
+	upsertSql := fmt.Sprintf("UPDATE process SET %s WHERE `uuid` = ?", updateFieldsSql)
+	sqlArgs = append(sqlArgs, data.Uuid)
 	_, err = tx.ExecContext(ctx, upsertSql, sqlArgs...)
 	if err != nil {
 		return err
@@ -164,22 +165,6 @@ func (ms *mysqlDatabase) UpdateProcessStat(ctx context.Context, processUuid stri
 	if err != nil {
 		return err
 	}
-	return tx.Commit()
-}
-
-func (ms *mysqlDatabase) SaveProcessStorage(ctx context.Context, id int64, data []byte) error {
-	tx, err := ms.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	updateSql := "UPDATE process SET storage=? WHERE id = ?"
-	_, err = tx.ExecContext(ctx, updateSql, data, id)
-	if err != nil {
-		return err
-	}
-
 	return tx.Commit()
 }
 
