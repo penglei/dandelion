@@ -81,11 +81,13 @@ func (p *processController) onRunning(eventCtx EventContext) EventType {
 
 	if err != nil {
 		if err == fsm.ErrEventRejected {
-			panic("unrecognized Event for process running, fsm can't progress by event: " + event)
+			p.lgr.Warn("unrecognized Event for process. FSM can't progress by the event ", zap.Any("event", event), zap.String("processUuid", p.model.id))
+			return Fail //TODO panic Task FSM shouldn't received an unrecognized
+		} else {
+			//TODO error maybe is internal error (e.g database persisting)
+			p.lgr.Warn("process running occurs an error", zap.Error(err))
+			return Fail
 		}
-		//TODO error maybe is internal error (e.g database persisting)
-		p.lgr.Warn("process running occurs an error", zap.Error(err))
-		return Fail
 	}
 
 	p.lgr.Info("a task has completed", zap.String("task_name", taskInstance.scheme.Name), zap.String("task_status", taskInstance.fsm.Current.String()))
@@ -179,7 +181,13 @@ func (p *processController) CurrentCompensationTask() *taskMachine {
 	}
 
 	//new
-	lastTaskState := executions[execLen-compLen-1]
+
+	index := execLen - compLen - 1
+	if index < 0 {
+		return nil
+	}
+
+	lastTaskState := executions[index]
 
 	taskScheme := p.model.scheme.GetTask(lastTaskState.Name)
 	taskInstance := NewTaskMachine(taskScheme, p.model, p.lgr)
