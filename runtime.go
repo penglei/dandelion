@@ -127,6 +127,18 @@ type Task struct {
 	EndedAt   *time.Time
 }
 
+//export
+type TriggerTooManyError struct {
+	ProcessUuid string
+	Event       string
+}
+
+func (t *TriggerTooManyError) Error() string {
+	return fmt.Sprintf("event can't accept multi trigger event. uuid=%s, event=%s", t.ProcessUuid, t.Event)
+}
+
+var _ error = &TriggerTooManyError{}
+
 func (p *Process) UnmarshalState(state interface{}) error {
 	return json.Unmarshal(p.storage, state)
 }
@@ -332,6 +344,14 @@ func (rt *Runtime) submitTriggerEvent(ctx context.Context, processUuid, event st
 	if err == nil {
 		rt.lg.Info("process event submitted", zap.String("uuid", processUuid), zap.String("event", event))
 	}
+
+	if mysql.IsKeyDuplicationError(err) {
+		return &TriggerTooManyError{
+			ProcessUuid: processUuid,
+			Event:       event,
+		}
+	}
+
 	return err
 
 }

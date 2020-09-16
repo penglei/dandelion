@@ -100,9 +100,9 @@ type ProcessDispatcher struct {
 
 func (e *ProcessDispatcher) dispatch(ctx context.Context, meta *ProcessTrigger) {
 	id := meta.uuid
-	processScheme, err := scheme.Resolve(meta.class)
-	if err != nil {
-		e.lgr.Error("can't resolve the process scheme", zap.Error(err))
+	processScheme, schemeErr := scheme.Resolve(meta.class)
+	if schemeErr != nil {
+		e.lgr.Error("can't resolve the process scheme", zap.Error(schemeErr))
 		return
 	}
 
@@ -139,7 +139,20 @@ func (e *ProcessDispatcher) dispatch(ctx context.Context, meta *ProcessTrigger) 
 		}
 
 		//we provide at most once semantics.
+		var err error
 		e.notifier.TriggerCommit(meta)
+		defer func() {
+			if err != nil {
+				lgr.Warn("process end", zap.Error(err), zap.String("event", meta.event))
+			}
+
+			if dbErr := e.db.UpdateProcessStat(context.Background(), meta.uuid, util.ProcessSetCompleteStat); dbErr != nil {
+				lgr.Warn("save process statistic information failed", zap.Error(dbErr))
+			}
+
+			lgr.Info("process end")
+			e.notifier.TriggerComplete(meta)
+		}()
 
 		//TODO
 		//we need to lock the process
@@ -152,7 +165,6 @@ func (e *ProcessDispatcher) dispatch(ctx context.Context, meta *ProcessTrigger) 
 
 		lgr.Info("process start")
 
-		var err error
 		switch meta.event {
 		case "Run":
 			storage := processScheme.NewStorage()
@@ -171,17 +183,6 @@ func (e *ProcessDispatcher) dispatch(ctx context.Context, meta *ProcessTrigger) 
 		default:
 			err = errors.New("unknown trigger event: " + meta.event)
 		}
-		if err != nil {
-			lgr.Warn("process fsm error", zap.Error(err), zap.String("event", meta.event))
-			return
-		}
-
-		if err := e.db.UpdateProcessStat(context.Background(), meta.uuid, util.ProcessSetCompleteStat); err != nil {
-			lgr.Warn("save process statistic information failed", zap.Error(err))
-		}
-
-		lgr.Info("process end")
-		e.notifier.TriggerComplete(meta)
 	}()
 
 }
