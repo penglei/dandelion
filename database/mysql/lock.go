@@ -221,7 +221,7 @@ func (m *mysqlLockImpl) checkLockConnAndDoHeartbeat(ctx context.Context) error {
 	for {
 		select {
 		case <-ticker.C:
-			m.lg.Info("detecting lock connection")
+			//m.lg.Info("detecting lock connection")
 			if err := m.conn.PingContext(ctx); err != nil {
 				return err
 			}
