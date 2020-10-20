@@ -133,11 +133,11 @@ type TriggerTooManyError struct {
 	Event       string
 }
 
-func (t *TriggerTooManyError) Error() string {
-	return fmt.Sprintf("event can't accept multi trigger event. uuid=%s, event=%s", t.ProcessUuid, t.Event)
+func (t TriggerTooManyError) Error() string {
+	return fmt.Sprintf("process can't accept multi trigger event simultaneously. uuid=%s, event=%s", t.ProcessUuid, t.Event)
 }
 
-var _ error = &TriggerTooManyError{}
+var _ error = TriggerTooManyError{}
 
 func (p *Process) UnmarshalState(state interface{}) error {
 	return json.Unmarshal(p.storage, state)
@@ -346,7 +346,7 @@ func (rt *Runtime) submitTriggerEvent(ctx context.Context, processUuid, event st
 	}
 
 	if mysql.IsKeyDuplicationError(err) {
-		return &TriggerTooManyError{
+		return TriggerTooManyError{
 			ProcessUuid: processUuid,
 			Event:       event,
 		}
