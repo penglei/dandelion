@@ -26,7 +26,7 @@ type ProcessTrigger struct {
 	uuid  string
 	class ProcessClass
 	data  []byte
-	event string //Run, Retry, Rollback, (Resume?)
+	event string //Run, Retry, Rollback, Resume(internal)
 }
 
 func (m *ProcessTrigger) GetOffset() int64 {
@@ -260,7 +260,7 @@ func (rt *Runtime) Bootstrap(ctx context.Context) error {
 	}
 	for _, obj := range unfinishedProcesses {
 		var event string
-		if obj.Status == executor.Interrupted {
+		if obj.Status == executor.Interrupted || obj.Status == executor.RInterrupted {
 			event = "Resume"
 		} else {
 			event = "" //recovery from crash

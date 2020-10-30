@@ -199,7 +199,7 @@ func (p *processController) CurrentCompensationTask() *taskMachine {
 }
 
 func (p *processController) onCompensating(eventCtx EventContext) EventType {
-	p.lgr.Info("process onCompensating")
+	p.lgr.Debug("process onCompensating", zap.Any("process", p.model.scheme.Name))
 	event := eventCtx.Event
 
 	p.model.state.IsCompensatingProgress = true
@@ -213,6 +213,8 @@ func (p *processController) onCompensating(eventCtx EventContext) EventType {
 	switch event {
 	case Rollback:
 		err = compInstance.Rollback(eventCtx)
+	case Resume:
+		err = compInstance.Resume(eventCtx) //TODO resume RInterrupted
 	default:
 		p.lgr.Warn("unknown event in compensating", zap.String("event", event.String()))
 	}
@@ -227,12 +229,20 @@ func (p *processController) onCompensating(eventCtx EventContext) EventType {
 	}
 
 	switch compInstance.fsm.Current {
+	case RInterrupted:
+		return Interrupt
 	case Reverted:
 		return Rollback
 	case Dirty: //the process enters Dirty status by returning RollbackFail event if any task rollback failed
 		return RollbackFail
 	}
-	return Success
+	p.lgr.Error("task is in an unexpected state when the process do Compensating")
+	return Success // shouldn't be here!
+}
+
+func (p *processController) onRollbackInterrupted(eventCtx EventContext) EventType {
+	p.lgr.Info("process onRollbackInterrupted")
+	return NoOp
 }
 
 func (p *processController) onDirty(eventCtx EventContext) EventType {

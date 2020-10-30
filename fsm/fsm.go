@@ -104,7 +104,8 @@ func (s *StateMachine) Restore(persistence Persistence) {
 	s.Current = persistence.Last
 }
 
-// SendEvent sends an event to the state machine.
+// SendEvent sends an event to the state machine. There only two classes error
+// returning to caller: ErrEventRejected, store error(concrete type is undecided)
 func (s *StateMachine) SendEvent(event EventType, ctx context.Context) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()

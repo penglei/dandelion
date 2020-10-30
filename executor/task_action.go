@@ -35,9 +35,9 @@ func registerError(value string) *stateError {
 	}
 }
 
+//var ErrStop = registerError("ErrorStop")
 var ErrTimeout = registerError("ErrorTimeout")
 var ErrRetry = registerError("ErrorRetry")
-var ErrStop = registerError("ErrorStop")
 var ErrInterrupt = registerError("ErrorInterrupt")
 
 func parseTaskRunningErr(taskReturningErr error) *SortableError {
@@ -144,7 +144,7 @@ func (tc *taskController) onSuccessful(eventCtx EventContext) EventType {
 }
 
 func (tc *taskController) onCompensating(eventCtx EventContext) EventType {
-	tc.lgr.Info("task onCompensating")
+	tc.lgr.Debug("task onCompensating", zap.String("task", tc.model.scheme.Name))
 	scheme := tc.model.scheme
 	processId := tc.model.parent.id
 	processState := &tc.model.parent.state
@@ -173,11 +173,21 @@ func (tc *taskController) onCompensating(eventCtx EventContext) EventType {
 	})
 
 	if taskCompensatingErr != nil {
-		//TODO save error
-		tc.lgr.Warn("task compensation error", zap.Error(taskCompensatingErr))
-		return RollbackFail
+		//TODO save error log
+		switch taskCompensatingErr {
+		case ErrInterrupt:
+			return Interrupt
+		default:
+			tc.lgr.Warn("task compensation error", zap.Error(taskCompensatingErr))
+			return RollbackFail
+		}
 	}
 	return Success
+}
+
+func (tc *taskController) onRollbackInterrupted(eventCtx EventContext) EventType {
+	tc.lgr.Info("onRollbackInterrupted")
+	return NoOp
 }
 
 func (tc *taskController) onDirty(eventCtx EventContext) EventType {
@@ -186,6 +196,7 @@ func (tc *taskController) onDirty(eventCtx EventContext) EventType {
 }
 
 func (tc *taskController) onReverted(eventCtx EventContext) EventType {
+	tc.lgr.Info("onReverted")
 	return NoOp
 }
 

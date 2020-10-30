@@ -41,7 +41,7 @@ func (ms *mysqlDatabase) LoadUnfinishedProcesses() ([]*database.ProcessDataObjec
 	}
 	defer tx.Rollback()
 
-	querySql := "SELECT `status`, `state`, `user`, `class`, `uuid` FROM process WHERE stage_committed = 0 OR `status` = 'Interrupted'"
+	querySql := "SELECT `status`, `state`, `user`, `class`, `uuid` FROM process WHERE stage_committed = 0 OR `status` IN ('Interrupted', 'RInterrupted')"
 	rows, err := tx.Query(querySql)
 	if err != nil {
 		return nil, err
