@@ -104,7 +104,7 @@ func (m *mysqlLockImpl) ReleaseLock(ctx context.Context, key string) error {
 
 func (m *mysqlLockImpl) checkSchemeLockWhetherIsOwned(ctx context.Context, key string) (bool, error) {
 	var connId sql.NullInt32
-	err := m.db.QueryRowContext(ctx, "SELECT IS_USED_LOCK(?) as conn_id", key).Scan(&connId)
+	err := m.conn.QueryRowContext(ctx, "SELECT IS_USED_LOCK(?) as conn_id", key).Scan(&connId)
 	if err != nil && !IsNoRowsError(err) {
 		return false, err
 	}
