@@ -467,10 +467,12 @@ func (rt *Runtime) onLockAgentError(reason error) {
 			rt.lg.Warn("!!! rebuilding runtime LockAgent..")
 			lockAgent, err := rt.lockAgentBuilder()
 			if err != nil {
+				lockAgent.Close()
 				rt.lg.Error("!!! rebuilding lock agent error", zap.Error(err))
 				continue
 			}
 			if err = lockAgent.Bootstrap(rt.ctx, rt.onLockAgentError); err != nil {
+				lockAgent.Close()
 				rt.lg.Error("!!! lock agent bootstrap error", zap.Error(err))
 				continue
 			}

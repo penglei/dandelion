@@ -127,7 +127,6 @@ func (e *ProcessDispatcher) dispatch(ctx context.Context, meta *ProcessTrigger) 
 			AgentName: e.name,
 		}); dbErr != nil {
 			lgr.Warn("call process initialize once failed", zap.Error(dbErr))
-			//TODO e.notifier.Redeliver(meta)
 			return
 		} else if created {
 			for _, t := range processScheme.Tasks {

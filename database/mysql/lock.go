@@ -294,6 +294,12 @@ func (m *mysqlLockImpl) Bootstrap(ctx context.Context, connErrCallback func(err 
 	return nil
 }
 
+func (m *mysqlLockImpl) Close() {
+	if m.conn != nil {
+		m.conn.Close()
+	}
+}
+
 func BuildMySQLLockAgent(db *sql.DB, lg *zap.Logger, agentName string, hbInterval time.Duration) (*mysqlLockImpl, error) {
 
 	//XXX how to rebuilt if lock connection closed ?
