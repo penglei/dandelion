@@ -131,7 +131,7 @@ func (ms *mysqlDatabase) InitProcessInstanceOnce(ctx context.Context, data datab
 	}
 
 	updateSql := "UPDATE process SET `latest_event` = ?, `stage_committed`=0, `agent_name` = ? WHERE uuid = ? "
-	_, err = tx.ExecContext(ctx, updateSql, data.Event, data.Uuid, data.AgentName)
+	_, err = tx.ExecContext(ctx, updateSql, data.Event, data.AgentName, data.Uuid)
 	if err != nil {
 		return false, err
 	}

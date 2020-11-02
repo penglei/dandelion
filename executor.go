@@ -110,6 +110,8 @@ func (e *ProcessDispatcher) dispatch(ctx context.Context, meta *ProcessTrigger) 
 		With(zap.String("processUuid", id),
 			zap.String("name", processScheme.Name.Raw()))
 
+	//TODO queue event
+
 	go func() {
 		exporter := &DatabaseExporter{
 			db:       e.db,
@@ -152,15 +154,6 @@ func (e *ProcessDispatcher) dispatch(ctx context.Context, meta *ProcessTrigger) 
 			lgr.Info("process end")
 			e.notifier.TriggerComplete(meta)
 		}()
-
-		//TODO
-		//we need to lock the process
-		/*
-			if !proc.Lock() {
-				return
-			}
-			defer proc.Unlock()
-		*/
 
 		lgr.Info("process start")
 
