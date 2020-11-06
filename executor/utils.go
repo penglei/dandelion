@@ -7,47 +7,6 @@ import (
 	"time"
 )
 
-//Deprecated
-func safetyRunDeprecated(done <-chan struct{}, fn func() error) <-chan error {
-	var out = make(chan error)
-
-	go func() {
-		defer close(out)
-		defer func() {
-			if r := recover(); r != nil {
-				panic(fmt.Errorf("unexpected: %v", r))
-			}
-		}()
-		err := fn()
-
-		select {
-		case <-done:
-		case out <- err:
-		}
-	}()
-
-	return out
-}
-
-//Deprecated
-func timeoutWrapperDeprecated(d time.Duration, fn func() error) error {
-	done := make(chan struct{})
-	t := time.NewTimer(d)
-	read := false
-	out := safetyRunDeprecated(done, fn)
-	select {
-	case <-t.C:
-		read = true
-		close(done)
-		return ErrTimeout
-	case err := <-out:
-		if !t.Stop() && !read {
-			<-t.C
-		}
-		return err
-	}
-}
-
 func safetyRun(ctx context.Context, fn func(context.Context) error) <-chan error {
 	var out = make(chan error)
 	go func() {
