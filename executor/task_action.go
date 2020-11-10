@@ -3,9 +3,10 @@ package executor
 import (
 	"context"
 	"fmt"
-	"go.uber.org/zap"
 	"runtime/debug"
 	"time"
+
+	"go.uber.org/zap"
 )
 
 type stateError struct {
@@ -35,7 +36,6 @@ func registerError(value string) *stateError {
 	}
 }
 
-//var ErrStop = registerError("ErrorStop")
 var ErrTimeout = registerError("ErrorTimeout")
 var ErrRetry = registerError("ErrorRetry")
 var ErrInterrupt = registerError("ErrorInterrupt")
@@ -59,11 +59,11 @@ func parseTaskRunningErr(taskReturningErr error) *SortableError {
 }
 
 type taskController struct {
-	model *taskMachine
+	model *TaskMachine
 	lgr   *zap.Logger
 }
 
-func NewTaskController(machine *taskMachine, lgr *zap.Logger) IActionHandle {
+func NewTaskController(machine *TaskMachine, lgr *zap.Logger) IActionHandle {
 	return &taskController{
 		model: machine,
 		lgr:   lgr,
@@ -76,7 +76,7 @@ func (tc *taskController) Info() string {
 func (tc *taskController) onRunning(eventCtx EventContext) EventType {
 	tc.lgr.Info("task onRunning")
 	scheme := tc.model.scheme
-	processId := tc.model.parent.id
+	processID := tc.model.parent.id
 	processState := &tc.model.parent.state
 
 	taskInfo := tc.Info()
@@ -88,7 +88,7 @@ func (tc *taskController) onRunning(eventCtx EventContext) EventType {
 		}()
 
 		//the context should be controlled by runtime instead of a root context
-		ctx := NewActionContext(parentCtx, processId, processState)
+		ctx := NewActionContext(parentCtx, processID, processState)
 		err = scheme.Task.Execute(ctx)
 		return err
 	}
@@ -97,9 +97,9 @@ func (tc *taskController) onRunning(eventCtx EventContext) EventType {
 		if scheme.Timeout > 0 {
 			timeout := time.Duration(scheme.Timeout)
 			return timeoutWrapper(timeout*time.Second, routine)
-		} else {
-			return routine(eventCtx)
 		}
+		// else
+		return routine(eventCtx)
 	})
 
 	var event EventType
@@ -146,7 +146,7 @@ func (tc *taskController) onSuccessful(eventCtx EventContext) EventType {
 func (tc *taskController) onCompensating(eventCtx EventContext) EventType {
 	tc.lgr.Debug("task onCompensating", zap.String("task", tc.model.scheme.Name))
 	scheme := tc.model.scheme
-	processId := tc.model.parent.id
+	processID := tc.model.parent.id
 	processState := &tc.model.parent.state
 
 	taskInfo := tc.Info()
@@ -158,7 +158,7 @@ func (tc *taskController) onCompensating(eventCtx EventContext) EventType {
 		}()
 
 		//the context should be controlled by runtime instead of root context
-		ctx := NewActionContext(parentCtx, processId, processState)
+		ctx := NewActionContext(parentCtx, processID, processState)
 		err = scheme.Task.Compensate(ctx)
 		return err
 	}
@@ -167,9 +167,9 @@ func (tc *taskController) onCompensating(eventCtx EventContext) EventType {
 		if scheme.Timeout > 0 {
 			timeout := time.Duration(scheme.Timeout)
 			return timeoutWrapper(timeout, routine)
-		} else {
-			return routine(eventCtx)
 		}
+		// else
+		return routine(eventCtx)
 	})
 
 	if taskCompensatingErr != nil {

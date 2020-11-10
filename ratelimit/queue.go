@@ -7,13 +7,13 @@ type QueuedThrottle struct {
 }
 
 func (q *QueuedThrottle) MergeInto(queue Sequence) {
-	newBack := queue.Back().Value.(OrderedMeta)
+	newBack, _ := queue.Back().Value.(OrderedMeta)
 	if newBack.GetOffset() <= q.lastOffset {
 		//no new queue
 		return
 	}
 
-	newFront := queue.Front().Value.(OrderedMeta)
+	newFront, _ := queue.Front().Value.(OrderedMeta)
 	if newFront.GetOffset() > q.lastOffset {
 		q.queue.PushBackList(queue)
 		q.lastOffset = q.queue.Back().Value.(OrderedMeta).GetOffset()
@@ -21,7 +21,7 @@ func (q *QueuedThrottle) MergeInto(queue Sequence) {
 	}
 
 	for elem := queue.Front(); elem != nil; elem = elem.Next() {
-		target := elem.Value.(OrderedMeta)
+		target, _ := elem.Value.(OrderedMeta)
 		if target.GetOffset() > q.lastOffset {
 			q.queue.PushBack(elem.Value)
 		}
@@ -32,7 +32,7 @@ func (q *QueuedThrottle) MergeInto(queue Sequence) {
 func (q *QueuedThrottle) Forward(target OrderedMeta) {
 
 	elem := q.queue.Front()
-	front := elem.Value.(OrderedMeta)
+	front, _ := elem.Value.(OrderedMeta)
 	if front.GetUUID() != target.GetUUID() {
 		panic("unreachable!")
 	}
@@ -55,18 +55,17 @@ func (q *QueuedThrottle) PickOutFront() []OrderedMeta {
 	if q.runningOffset == 0 {
 		frontElem := q.queue.Front()
 		if frontElem != nil {
-			item := frontElem.Value.(OrderedMeta)
+			item, _ := frontElem.Value.(OrderedMeta)
 			q.runningOffset = item.GetOffset()
 			return []OrderedMeta{item}
 		}
-	} else {
-		//log no queue to run
 	}
+	// else //log no queue to run
 	return nil
 }
 
 func NewQueuedThrottle(queue Sequence) *QueuedThrottle {
-	last := queue.Back().Value.(OrderedMeta)
+	last, _ := queue.Back().Value.(OrderedMeta)
 	q := &QueuedThrottle{
 		lastOffset:    last.GetOffset(),
 		runningOffset: 0,

@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+
 	"github.com/penglei/dandelion/fsm"
 	"github.com/penglei/dandelion/scheme"
 )
@@ -52,23 +53,22 @@ type TaskStateDetail struct {
 	ErrorMsg  string
 }
 
-//client visible context
 type actionContext struct {
 	context.Context
 	state     *ProcessState
-	processId string
+	processID string
 }
 
-func NewActionContext(ctx context.Context, processId string, state *ProcessState) *actionContext {
+func NewActionContext(ctx context.Context, processID string, state *ProcessState) scheme.Context {
 	return &actionContext{
 		Context:   ctx,
 		state:     state,
-		processId: processId,
+		processID: processID,
 	}
 }
 
-func (tc *actionContext) ProcessId() string {
-	return tc.processId
+func (tc *actionContext) ProcessID() string {
+	return tc.processID
 }
 
 func (tc *actionContext) Global() interface{} {

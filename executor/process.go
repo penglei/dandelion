@@ -2,9 +2,11 @@ package executor
 
 import (
 	"context"
+
+	"go.uber.org/zap"
+
 	"github.com/penglei/dandelion/fsm"
 	"github.com/penglei/dandelion/scheme"
-	"go.uber.org/zap"
 )
 
 type ProcessWorker struct {
@@ -13,13 +15,13 @@ type ProcessWorker struct {
 }
 
 func NewProcessWorker(
-	processUuid string,
+	processUUID string,
 	scheme *scheme.ProcessScheme,
 	exporter SnapshotExporter,
 	lgr *zap.Logger,
 ) *ProcessWorker {
 	instance := &processMachine{
-		id:       processUuid,
+		id:       processUUID,
 		scheme:   *scheme,
 		exporter: exporter,
 		state:    NewProcessState(),

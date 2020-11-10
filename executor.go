@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+
+	"go.uber.org/zap"
+
 	"github.com/penglei/dandelion/database"
 	"github.com/penglei/dandelion/executor"
 	"github.com/penglei/dandelion/scheme"
 	"github.com/penglei/dandelion/util"
-	"go.uber.org/zap"
 )
 
 type processMetadata struct {
@@ -22,7 +24,7 @@ type DatabaseExporter struct {
 	lgr      *zap.Logger
 }
 
-func (de *DatabaseExporter) WriteProcess(processUuid string, snapshot executor.ProcessState) error {
+func (de *DatabaseExporter) WriteProcess(processUUID string, snapshot executor.ProcessState) error {
 	ctx := context.Background()
 
 	storage := snapshot.Storage
@@ -38,7 +40,7 @@ func (de *DatabaseExporter) WriteProcess(processUuid string, snapshot executor.P
 	}
 	currentStatus := snapshot.FsmPersistence.Current
 	data := database.ProcessDataObject{
-		Uuid:    processUuid,
+		UUID:    processUUID,
 		Status:  currentStatus.String(),
 		State:   stateBytes,
 		Storage: storageBytes,
@@ -51,9 +53,9 @@ func (de *DatabaseExporter) WriteProcess(processUuid string, snapshot executor.P
 	return err
 }
 
-func (de *DatabaseExporter) ReadProcess(processUuid string) (*executor.ProcessState, error) {
+func (de *DatabaseExporter) ReadProcess(processUUID string) (*executor.ProcessState, error) {
 	ctx := context.Background()
-	processDataObject, err := de.db.GetProcess(ctx, processUuid)
+	processDataObject, err := de.db.GetProcess(ctx, processUUID)
 	if err != nil {
 		return nil, err
 	}
@@ -75,10 +77,11 @@ func (de *DatabaseExporter) ReadProcess(processUuid string) (*executor.ProcessSt
 	return state, nil
 }
 
-func (de *DatabaseExporter) WriteTaskDetail(processUuid string, taskName string, td executor.TaskStateDetail, opts ...util.BitMask) error {
+func (de *DatabaseExporter) WriteTaskDetail(
+	processUUID string, taskName string, td executor.TaskStateDetail, opts ...util.BitMask) error {
 	ctx := context.Background()
 	data := database.TaskDataObject{
-		ProcessUuid: processUuid,
+		ProcessUUID: processUUID,
 		Name:        taskName,
 		Status:      td.Status,
 		ErrorCode:   td.ErrorCode,
@@ -123,7 +126,7 @@ func (e *ProcessDispatcher) dispatch(ctx context.Context, meta *ProcessTrigger) 
 		proc := executor.NewProcessWorker(id, processScheme, exporter, lgr)
 
 		if created, dbErr := e.db.InitProcessInstanceOnce(ctx, database.ProcessDataObject{
-			Uuid:      meta.uuid,
+			UUID:      meta.uuid,
 			User:      meta.user,
 			Class:     meta.class.Raw(),
 			AgentName: e.name,
@@ -194,7 +197,8 @@ func (e *ProcessDispatcher) Release() {
 	close(e.release)
 }
 
-func NewProcessDispatcher(name string, notifyAgent *Notifier, db database.Database, lgr *zap.Logger) *ProcessDispatcher {
+func NewProcessDispatcher(name string, notifyAgent *Notifier,
+	db database.Database, lgr *zap.Logger) *ProcessDispatcher {
 	e := &ProcessDispatcher{
 		name:     name,
 		lgr:      lgr,

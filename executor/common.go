@@ -15,28 +15,28 @@ const NoOp = fsm.NoOp
 
 //states
 const (
-	Running      StateType = "Running"
-	Interrupted            = "Interrupted"
-	Retryable              = "Retryable"
-	Failed                 = "Failed"
-	Successful             = "Successful"
-	Compensating           = "Compensating"
-	RInterrupted           = "RInterrupted"
-	Reverted               = "Reverted"
-	Dirty                  = "Dirty"
+	Running      = StateType("Running")
+	Interrupted  = StateType("Interrupted")
+	Retryable    = StateType("Retryable")
+	Failed       = StateType("Failed")
+	Successful   = StateType("Successful")
+	Compensating = StateType("Compensating")
+	RInterrupted = StateType("RInterrupted")
+	Reverted     = StateType("Reverted")
+	Dirty        = StateType("Dirty")
 )
 
 //events
 const (
-	Run          EventType = "Run"
-	Interrupt              = "Interrupt"
-	Resume                 = "Resume"
-	WaitRetry              = "WaitRetry"
-	Retry                  = "Retry"
-	Success                = "Success"
-	Fail                   = "Fail"
-	Rollback               = "Rollback"
-	RollbackFail           = "RollbackFail"
+	Run          = EventType("Run")
+	Interrupt    = EventType("Interrupt")
+	Resume       = EventType("Resume")
+	WaitRetry    = EventType("WaitRetry")
+	Retry        = EventType("Retry")
+	Success      = EventType("Success")
+	Fail         = EventType("Fail")
+	Rollback     = EventType("Rollback")
+	RollbackFail = EventType("RollbackFail")
 )
 
 type IActionHandle interface {
@@ -190,11 +190,4 @@ func NewProcessFSM(controller IActionHandle, store fsm.IStore) *fsm.StateMachine
 			},
 		},
 	}
-}
-
-type ProcessMetadata struct {
-	Uuid string
-}
-
-type TaskMetadata struct {
 }

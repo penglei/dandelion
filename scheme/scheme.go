@@ -8,7 +8,7 @@ import (
 
 type Context interface {
 	context.Context
-	ProcessId() string
+	ProcessID() string
 	Global() interface{} //Get process storage
 }
 
@@ -110,7 +110,7 @@ func Resolve(name ProcessClass) (*ProcessScheme, error) {
 	s, ok := schemes[name]
 	if ok {
 		return s, nil
-	} else {
-		return nil, InvalidScheme{name: name.Raw()}
 	}
+	// else
+	return nil, InvalidScheme{name: name.Raw()}
 }

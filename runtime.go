@@ -7,15 +7,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
+	"time"
+
 	"github.com/pborman/uuid"
+	"go.uber.org/zap"
+
 	"github.com/penglei/dandelion/database"
 	"github.com/penglei/dandelion/database/mysql"
 	"github.com/penglei/dandelion/executor"
 	"github.com/penglei/dandelion/ratelimit"
 	"github.com/penglei/dandelion/scheme"
-	"go.uber.org/zap"
-	"sync"
-	"time"
 )
 
 type Sequence = ratelimit.Sequence
@@ -111,7 +113,7 @@ func NewShapingManager() *ShapingManager {
 
 //export
 type Process struct {
-	Uuid    string
+	UUID    string
 	Class   string
 	Status  string
 	storage []byte
@@ -129,12 +131,13 @@ type Task struct {
 
 //export
 type TriggerTooManyError struct {
-	ProcessUuid string
+	ProcessUUID string
 	Event       string
 }
 
 func (t TriggerTooManyError) Error() string {
-	return fmt.Sprintf("process can't accept multi trigger event simultaneously. uuid=%s, event=%s", t.ProcessUuid, t.Event)
+	return fmt.Sprintf("process can't accept multi trigger event simultaneously. uuid=%s, event=%s",
+		t.ProcessUUID, t.Event)
 }
 
 var _ error = TriggerTooManyError{}
@@ -260,13 +263,13 @@ func (rt *Runtime) Bootstrap(ctx context.Context) error {
 	}
 	for _, obj := range unfinishedProcesses {
 		var event string
-		if obj.Status == executor.Interrupted || obj.Status == executor.RInterrupted {
+		if obj.Status == executor.Interrupted.String() || obj.Status == executor.RInterrupted.String() {
 			event = "Resume"
 		} else {
 			event = "" //recovery from crash
 		}
 		trigger := &database.ProcessTriggerObject{
-			UUID:  obj.Uuid,
+			UUID:  obj.UUID,
 			User:  obj.User,
 			Class: obj.Class,
 			Event: event,
@@ -324,17 +327,17 @@ func (rt *Runtime) Run(
 	return meta.UUID, nil
 }
 
-func (rt *Runtime) submitTriggerEvent(ctx context.Context, processUuid, event string) error {
-	processData, err := rt.db.GetProcess(ctx, processUuid)
+func (rt *Runtime) submitTriggerEvent(ctx context.Context, processUUID, event string) error {
+	processData, err := rt.db.GetProcess(ctx, processUUID)
 	if err != nil {
 		return err
 	}
 	if processData == nil {
-		return errors.New("process instance not found: " + processUuid)
+		return errors.New("process instance not found: " + processUUID)
 	}
 
 	meta := &database.ProcessTriggerObject{
-		UUID:  processUuid,
+		UUID:  processUUID,
 		User:  processData.User,
 		Class: processData.Class,
 		Data:  processData.Storage,
@@ -342,12 +345,12 @@ func (rt *Runtime) submitTriggerEvent(ctx context.Context, processUuid, event st
 	}
 	err = rt.db.CreateProcessTrigger(ctx, meta)
 	if err == nil {
-		rt.lg.Info("process event submitted", zap.String("uuid", processUuid), zap.String("event", event))
+		rt.lg.Info("process event submitted", zap.String("uuid", processUUID), zap.String("event", event))
 	}
 
 	if mysql.IsKeyDuplicationError(err) {
 		return TriggerTooManyError{
-			ProcessUuid: processUuid,
+			ProcessUUID: processUUID,
 			Event:       event,
 		}
 	}
@@ -363,8 +366,8 @@ func (rt *Runtime) Rollback(ctx context.Context, id string) error {
 	return rt.submitTriggerEvent(ctx, id, "Rollback")
 }
 
-func (rt *Runtime) GetProcess(ctx context.Context, processUuid string) (*Process, error) {
-	processData, err := rt.db.GetProcess(ctx, processUuid)
+func (rt *Runtime) GetProcess(ctx context.Context, processUUID string) (*Process, error) {
+	processData, err := rt.db.GetProcess(ctx, processUUID)
 	if err != nil {
 		return nil, err
 	}
@@ -373,7 +376,7 @@ func (rt *Runtime) GetProcess(ctx context.Context, processUuid string) (*Process
 	}
 
 	p := &Process{
-		Uuid:    processData.Uuid,
+		UUID:    processData.UUID,
 		Class:   processData.Class,
 		Status:  processData.Status,
 		storage: processData.Storage,
@@ -388,8 +391,8 @@ func (rt *Runtime) GetProcess(ctx context.Context, processUuid string) (*Process
 	return p, nil
 }
 
-func (rt *Runtime) GetProcessTasks(ctx context.Context, processUuid string) ([]*Task, error) {
-	taskDataObjects, err := rt.db.GetProcessTasks(ctx, processUuid)
+func (rt *Runtime) GetProcessTasks(ctx context.Context, processUUID string) ([]*Task, error) {
+	taskDataObjects, err := rt.db.GetProcessTasks(ctx, processUUID)
 	if err != nil {
 		return nil, err
 	}
@@ -441,7 +444,7 @@ func (rt *Runtime) iterate(ctx context.Context) error {
 			metas, err := rt.fetchAllFlyingProcesses(ctx)
 			//rt.lg.Debug("fetchAllFlyingProcesses", zap.Int("count", len(metas)))
 			if err != nil {
-				rt.errorCount += 1
+				rt.errorCount++
 				rt.lg.Warn("pull process meta error", zap.Error(err), zap.Int("errorCount", rt.errorCount))
 			} else {
 				rt.errorCount = 0

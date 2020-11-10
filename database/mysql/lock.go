@@ -4,10 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"github.com/pkg/errors"
-	"go.uber.org/zap"
 	"sync"
 	"time"
+
+	"github.com/pkg/errors"
+	"go.uber.org/zap"
 )
 
 type mysqlLockTimer struct {
@@ -16,37 +17,38 @@ type mysqlLockTimer struct {
 	AgentName string
 }
 
-func getConnId(conn *sql.Conn) (int, error) {
+func getConnID(conn *sql.Conn) (int, error) {
 	ctx := context.Background()
-	var connId int
-	err := conn.QueryRowContext(ctx, "SELECT CONNECTION_ID() as conn_id").Scan(&connId)
+	var connID int
+	err := conn.QueryRowContext(ctx, "SELECT CONNECTION_ID() as conn_id").Scan(&connID)
 	if err != nil {
 		return 0, errors.WithStack(err)
 	}
-	return connId, err
+	return connID, err
 }
 
 //notice: Acquire/Release is not thread-safety
-type mysqlLockImpl struct {
+type LockImpl struct {
 	agentName    string
 	lg           *zap.Logger
 	db           *sql.DB
 	conn         *sql.Conn
-	lockerConnId int
+	lockerConnID int
 	hbInterval   time.Duration
 	waitInterval time.Duration // int64(HbInterval) * 1500 * 1000 * 1000)
 	lockersMutex sync.RWMutex
 	lockers      map[string]struct{}
 }
 
-func (m *mysqlLockImpl) cacheLocker(ctx context.Context, key string) {
+func (m *LockImpl) cacheLocker(ctx context.Context, key string) {
 	m.lockersMutex.Lock()
 	m.lockers[key] = struct{}{}
 	m.lockersMutex.Unlock()
 }
 
-func (m *mysqlLockImpl) registerLock(ctx context.Context, key string) error {
-	_, err := m.db.ExecContext(ctx, "INSERT lock_timer (`key`, `agent_name`, `last_seen`) VALUES(?, ?, NOW())", key, m.agentName)
+func (m *LockImpl) registerLock(ctx context.Context, key string) error {
+	_, err := m.db.ExecContext(ctx,
+		"INSERT lock_timer (`key`, `agent_name`, `last_seen`) VALUES(?, ?, NOW())", key, m.agentName)
 	if IsKeyDuplicationError(err) {
 		return err
 	}
@@ -54,19 +56,20 @@ func (m *mysqlLockImpl) registerLock(ctx context.Context, key string) error {
 	return nil
 }
 
-func (m *mysqlLockImpl) getLockTimerRecord(ctx context.Context, key string) (*mysqlLockTimer, error) {
+func (m *LockImpl) getLockTimerRecord(ctx context.Context, key string) (*mysqlLockTimer, error) {
 	lockTimer := &mysqlLockTimer{Key: key}
-	querySql := "SELECT agent_name, last_seen FROM lock_timer WHERE `key` = ?"
-	err := m.db.QueryRowContext(ctx, querySql, key).Scan(&lockTimer.AgentName, &lockTimer.LastSeen)
-	if hasErr, err := CheckNoRowsError(err); hasErr {
-		return nil, err
+	querySQL := "SELECT agent_name, last_seen FROM lock_timer WHERE `key` = ?"
+	err := m.db.QueryRowContext(ctx, querySQL, key).Scan(&lockTimer.AgentName, &lockTimer.LastSeen)
+	if hasErr, err2 := CheckNoRowsError(err); hasErr {
+		return nil, err2
 	}
 	return lockTimer, nil
 }
 
-func (m *mysqlLockImpl) takeoverLock(ctx context.Context, key string) error {
-	upsertSql := "INSERT INTO lock_timer (`key`, agent_name, last_seen) VALUES (?, ?, NOW()) ON DUPLICATE KEY UPDATE last_seen = NOW(), agent_name = ?"
-	_, err := m.db.ExecContext(ctx, upsertSql, key, m.agentName, m.agentName)
+func (m *LockImpl) takeoverLock(ctx context.Context, key string) error {
+	upsertSQL := "INSERT INTO lock_timer (`key`, agent_name, last_seen)" +
+		" VALUES (?, ?, NOW()) ON DUPLICATE KEY UPDATE last_seen = NOW(), agent_name = ?"
+	_, err := m.db.ExecContext(ctx, upsertSQL, key, m.agentName, m.agentName)
 	if err != nil {
 		return err
 	}
@@ -75,7 +78,7 @@ func (m *mysqlLockImpl) takeoverLock(ctx context.Context, key string) error {
 	return err
 }
 
-func (m *mysqlLockImpl) releaseSchemaLock(ctx context.Context, key string) error {
+func (m *LockImpl) releaseSchemaLock(ctx context.Context, key string) error {
 	var r sql.NullInt32
 	err := m.conn.QueryRowContext(ctx, "SELECT RELEASE_LOCK(?) as conn_id", key).Scan(&r)
 	if err != nil && !IsNoRowsError(err) {
@@ -83,14 +86,12 @@ func (m *mysqlLockImpl) releaseSchemaLock(ctx context.Context, key string) error
 	}
 
 	m.lockersMutex.Lock()
-	if _, ok := m.lockers[key]; ok {
-		delete(m.lockers, key)
-	}
+	delete(m.lockers, key)
 	m.lockersMutex.Unlock()
 	return nil
 }
 
-func (m *mysqlLockImpl) ReleaseLock(ctx context.Context, key string) error {
+func (m *LockImpl) ReleaseLock(ctx context.Context, key string) error {
 	if err := m.releaseSchemaLock(ctx, key); err != nil {
 		return err
 	}
@@ -102,16 +103,16 @@ func (m *mysqlLockImpl) ReleaseLock(ctx context.Context, key string) error {
 	return nil
 }
 
-func (m *mysqlLockImpl) checkSchemeLockWhetherIsOwned(ctx context.Context, key string) (bool, error) {
-	var connId sql.NullInt32
-	err := m.conn.QueryRowContext(ctx, "SELECT IS_USED_LOCK(?) as conn_id", key).Scan(&connId)
+func (m *LockImpl) checkSchemeLockWhetherIsOwned(ctx context.Context, key string) (bool, error) {
+	var connID sql.NullInt32
+	err := m.conn.QueryRowContext(ctx, "SELECT IS_USED_LOCK(?) as conn_id", key).Scan(&connID)
 	if err != nil && !IsNoRowsError(err) {
 		return false, err
 	}
 
 	// not null, lock is used
-	if connId.Valid {
-		if int(connId.Int32) == m.lockerConnId {
+	if connID.Valid {
+		if int(connID.Int32) == m.lockerConnID {
 			return true, nil
 		}
 	}
@@ -119,7 +120,7 @@ func (m *mysqlLockImpl) checkSchemeLockWhetherIsOwned(ctx context.Context, key s
 	return false, nil
 }
 
-func (m *mysqlLockImpl) doLockRequest(ctx context.Context, key string) (bool, error) {
+func (m *LockImpl) doLockRequest(ctx context.Context, key string) (bool, error) {
 	var flag sql.NullInt32
 	err := m.conn.QueryRowContext(ctx, "SELECT GET_LOCK(?, 0) as flag", key).Scan(&flag)
 	if err != nil && !IsNoRowsError(err) {
@@ -136,7 +137,7 @@ func (m *mysqlLockImpl) doLockRequest(ctx context.Context, key string) (bool, er
 
 //acquire lock for the key.
 //the method will block the request for a while, caller running in a new goroutine is better.
-func (m *mysqlLockImpl) AcquireLock(ctx context.Context, key string) (bool, error) {
+func (m *LockImpl) AcquireLock(ctx context.Context, key string) (bool, error) {
 
 	isOwned, err := m.checkSchemeLockWhetherIsOwned(ctx, key)
 	if err != nil {
@@ -208,13 +209,12 @@ func (m *mysqlLockImpl) AcquireLock(ctx context.Context, key string) (bool, erro
 			return false, err
 		}
 		return true, nil
-	} else {
-		// another executor is apparent death, we should take over the lock meta.
-		return false, nil
 	}
+	// else // another executor is apparent death, we should take over the lock meta.
+	return false, nil
 }
 
-func (m *mysqlLockImpl) checkLockConnAndDoHeartbeat(ctx context.Context) error {
+func (m *LockImpl) checkLockConnAndDoHeartbeat(ctx context.Context) error {
 	ticker := time.NewTicker(m.hbInterval)
 	defer ticker.Stop()
 
@@ -237,8 +237,8 @@ func (m *mysqlLockImpl) checkLockConnAndDoHeartbeat(ctx context.Context) error {
 			m.lockersMutex.RUnlock()
 
 			err := func() error {
-				hbSql := "UPDATE lock_timer SET last_seen=NOW() WHERE `key` = ?"
-				stmt, err := m.db.PrepareContext(ctx, hbSql)
+				hbSQL := "UPDATE lock_timer SET last_seen=NOW() WHERE `key` = ?"
+				stmt, err := m.db.PrepareContext(ctx, hbSQL)
 				if err != nil {
 					return err
 				}
@@ -264,13 +264,13 @@ func (m *mysqlLockImpl) checkLockConnAndDoHeartbeat(ctx context.Context) error {
 	}
 }
 
-func (m *mysqlLockImpl) checkRunningAgain(ctx context.Context) (bool, error) {
+func (m *LockImpl) checkRunningAgain(ctx context.Context) (bool, error) {
 	agentInstanceKey := fmt.Sprintf("__flow_agent__:%s", m.agentName)
 	locked, err := m.doLockRequest(ctx, agentInstanceKey)
 	return !locked, err
 }
 
-func (m *mysqlLockImpl) Bootstrap(ctx context.Context, connErrCallback func(err error)) error {
+func (m *LockImpl) Bootstrap(ctx context.Context, connErrCallback func(err error)) error {
 
 	yes, err := m.checkRunningAgain(ctx)
 	if err != nil {
@@ -285,8 +285,8 @@ func (m *mysqlLockImpl) Bootstrap(ctx context.Context, connErrCallback func(err 
 
 		if err != nil {
 			m.lg.Warn("locker checking exit accidentally", zap.Error(err))
-			if err := m.conn.Close(); err != nil {
-				m.lg.Error("close lock agent connection error", zap.Error(err))
+			if err1 := m.conn.Close(); err1 != nil {
+				m.lg.Error("close lock agent connection error", zap.Error(err1))
 			}
 			connErrCallback(err)
 		}
@@ -294,13 +294,14 @@ func (m *mysqlLockImpl) Bootstrap(ctx context.Context, connErrCallback func(err 
 	return nil
 }
 
-func (m *mysqlLockImpl) Close() {
+func (m *LockImpl) Close() {
 	if m.conn != nil {
 		m.conn.Close()
 	}
 }
 
-func BuildMySQLLockAgent(db *sql.DB, lg *zap.Logger, agentName string, hbInterval time.Duration) (*mysqlLockImpl, error) {
+func BuildMySQLLockAgent(
+	db *sql.DB, lg *zap.Logger, agentName string, hbInterval time.Duration) (*LockImpl, error) {
 
 	//XXX how to rebuilt if lock connection closed ?
 
@@ -310,17 +311,17 @@ func BuildMySQLLockAgent(db *sql.DB, lg *zap.Logger, agentName string, hbInterva
 	if err != nil {
 		return nil, err
 	}
-	var lockerConnId int
-	if lockerConnId, err = getConnId(conn); err != nil {
+	var lockerConnID int
+	if lockerConnID, err = getConnID(conn); err != nil {
 		return nil, err
 	}
 
-	return &mysqlLockImpl{
+	return &LockImpl{
 		agentName:    agentName,
 		lg:           lg,
 		db:           db,
 		conn:         conn,
-		lockerConnId: lockerConnId,
+		lockerConnID: lockerConnID,
 		hbInterval:   hbInterval,
 		//report status by saving current time to database every 3 seconds
 		//so every lock acquiring should wait more than 3 seconds(is 1.5 times better?) for

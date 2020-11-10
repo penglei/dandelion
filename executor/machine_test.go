@@ -4,13 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/pborman/uuid"
-	"github.com/penglei/dandelion/scheme"
-	"github.com/penglei/dandelion/util"
-	"go.uber.org/zap"
-	"gotest.tools/assert"
 	"log"
 	"testing"
+
+	"github.com/pborman/uuid"
+	"go.uber.org/zap"
+	"gotest.tools/assert"
+
+	"github.com/penglei/dandelion/scheme"
+	"github.com/penglei/dandelion/util"
 )
 
 type memorySnapshotExporter struct {
@@ -18,7 +20,8 @@ type memorySnapshotExporter struct {
 	data   []byte
 }
 
-func (m *memorySnapshotExporter) WriteTaskDetail(processUuid string, taskName string, data TaskStateDetail, opts ...util.BitMask) error {
+func (m *memorySnapshotExporter) WriteTaskDetail(
+	processUUID string, taskName string, data TaskStateDetail, opts ...util.BitMask) error {
 	return nil
 }
 
@@ -40,7 +43,7 @@ func (m *memorySnapshotExporter) ReadProcess(id string) (*ProcessState, error) {
 
 func newMemorySnapshotExporter() *memorySnapshotExporter {
 	return &memorySnapshotExporter{
-		stores: make(map[string]ProcessState, 0),
+		stores: make(map[string]ProcessState),
 	}
 }
 
@@ -57,7 +60,7 @@ type testProcessTasks struct {
 var disableTestPanic = false
 
 func (mj *testProcessTasks) FirstTask(ctx scheme.Context) error {
-	storage := ctx.Global().(*appStorage)
+	storage, _ := ctx.Global().(*appStorage)
 	mj.sth = "mesh-" + uuid.New()
 	log.Printf("FirstTask running, storage: %v\n", storage)
 	log.Printf("FirstTask set data: %v", mj.sth)
@@ -69,7 +72,7 @@ func (mj *testProcessTasks) FirstTask(ctx scheme.Context) error {
 }
 
 func (mj *testProcessTasks) SecondTask(ctx scheme.Context) error {
-	storage := ctx.Global().(*appStorage)
+	storage, _ := ctx.Global().(*appStorage)
 	log.Printf("SecondTask running, data: %v, storage: %v\n", mj.sth, storage)
 	return nil
 }
@@ -108,15 +111,15 @@ func TestRuntime(t *testing.T) {
 	assert.NilError(t, err)
 	zap.ReplaceGlobals(lgr)
 
-	processId := "aaa"
+	processID := "aaa"
 	testProcessScheme, err := scheme.Resolve(name)
 	assert.NilError(t, err)
 
 	exporter := newMemorySnapshotExporter()
-	w := NewProcessWorker(processId, testProcessScheme, exporter, lgr)
+	w := NewProcessWorker(processID, testProcessScheme, exporter, lgr)
 	ctx := context.Background()
 
-	storage := testProcessScheme.NewStorage().(*appStorage)
+	storage, _ := testProcessScheme.NewStorage().(*appStorage)
 
 	err = w.Run(ctx, storage)
 	assert.NilError(t, err)
@@ -124,7 +127,7 @@ func TestRuntime(t *testing.T) {
 	snapshot := make(map[string]ProcessState)
 	err = json.Unmarshal(exporter.data, &snapshot)
 	assert.NilError(t, err)
-	fmt.Printf("%+v\n", snapshot[processId].Storage)
+	fmt.Printf("%+v\n", snapshot[processID].Storage)
 
 	disableTestPanic = true
 
@@ -133,5 +136,5 @@ func TestRuntime(t *testing.T) {
 
 	err = json.Unmarshal(exporter.data, &snapshot)
 	assert.NilError(t, err)
-	fmt.Printf("%+v\n", snapshot[processId].Storage)
+	fmt.Printf("%+v\n", snapshot[processID].Storage)
 }

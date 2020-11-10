@@ -2,9 +2,11 @@ package executor
 
 import (
 	"context"
+
+	"go.uber.org/zap"
+
 	"github.com/penglei/dandelion/fsm"
 	"github.com/penglei/dandelion/scheme"
-	"go.uber.org/zap"
 )
 
 type processController struct {
@@ -12,7 +14,7 @@ type processController struct {
 	lgr   *zap.Logger
 }
 
-func (p *processController) CurrentExecutionTask() *taskMachine {
+func (p *processController) CurrentExecutionTask() *TaskMachine {
 	executions := p.model.state.Executions
 
 	executionsCnt := len(executions)
@@ -23,9 +25,8 @@ func (p *processController) CurrentExecutionTask() *taskMachine {
 		if taskState.FsmPersistence.Current == Successful {
 			if executionsCnt == tasksCnt {
 				return nil
-			} else {
-				//goto new
 			}
+			//else //goto new
 		} else {
 			//recover
 			taskScheme := p.model.scheme.GetTask(taskState.Name)
@@ -34,8 +35,7 @@ func (p *processController) CurrentExecutionTask() *taskMachine {
 			taskInstance.Restate(taskState)
 			return taskInstance
 		}
-	} else {
-		//goto new
+		// else //goto new
 	}
 
 	//new
@@ -81,16 +81,20 @@ func (p *processController) onRunning(eventCtx EventContext) EventType {
 
 	if err != nil {
 		if err == fsm.ErrEventRejected {
-			p.lgr.Warn("unrecognized Event for process. FSM can't progress by the event ", zap.Any("event", event), zap.String("processUuid", p.model.id))
+			p.lgr.Warn("unrecognized Event for process. FSM can't progress by the event ",
+				zap.Any("event", event),
+				zap.String("processUuid", p.model.id))
 			return Fail //TODO panic Task FSM shouldn't received an unrecognized
-		} else {
-			//TODO error maybe is internal error (e.g database persisting)
-			p.lgr.Warn("process running occurs an error", zap.Error(err))
-			return Fail
 		}
+		// else
+		//TODO error maybe is internal error (e.g database persisting)
+		p.lgr.Warn("process running occurs an error", zap.Error(err))
+		return Fail
 	}
 
-	p.lgr.Info("a task has completed", zap.String("task_name", taskInstance.scheme.Name), zap.String("task_status", taskInstance.fsm.Current.String()))
+	p.lgr.Info("a task has completed",
+		zap.String("task_name", taskInstance.scheme.Name),
+		zap.String("task_status", taskInstance.fsm.Current.String()))
 	switch taskInstance.fsm.Current {
 	case Successful: //Next
 		return Run //taskInstance would update internal state
@@ -141,20 +145,20 @@ func (p *processController) onSuccessful(eventCtx EventContext) EventType {
 	return NoOp
 }
 
-func (p *processController) CurrentCompensationTask() *taskMachine {
+func (p *processController) CurrentCompensationTask() *TaskMachine {
 	executions := p.model.state.Executions
 	compensations := p.model.state.Compensations
 
 	execLen := 0
 	//TODO optimize
-	for i := 0; i < len(executions); i += 1 {
+	for i := 0; i < len(executions); i++ {
 		if executions[i].FsmPersistence.Current == Failed {
 			if p.model.scheme.Tasks[i].ForceCompensation {
-				execLen += 1
+				execLen++
 			}
 			break
 		} else {
-			execLen += 1
+			execLen++
 		}
 	}
 
@@ -165,9 +169,8 @@ func (p *processController) CurrentCompensationTask() *taskMachine {
 		if compTaskState.FsmPersistence.Current == Reverted {
 			if execLen == compLen {
 				return nil
-			} else {
-				// goto new
 			}
+			//else // goto new
 		} else {
 			//recover
 			taskScheme := p.model.scheme.GetTask(compTaskState.Name)
@@ -176,12 +179,10 @@ func (p *processController) CurrentCompensationTask() *taskMachine {
 			taskInstance.Restate(compTaskState)
 			return taskInstance
 		}
-	} else {
-		//goto new
+		//else //goto new
 	}
 
 	//new
-
 	index := execLen - compLen - 1
 	if index < 0 {
 		return nil

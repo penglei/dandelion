@@ -106,7 +106,7 @@ func (s *StateMachine) Restore(persistence Persistence) {
 
 // SendEvent sends an event to the state machine. There only two classes error
 // returning to caller: ErrEventRejected, store error(concrete type is undecided)
-func (s *StateMachine) SendEvent(event EventType, ctx context.Context) error {
+func (s *StateMachine) SendEvent(ctx context.Context, event EventType) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -125,6 +125,7 @@ func (s *StateMachine) SendEvent(event EventType, ctx context.Context) error {
 		state, ok := s.States[nextState]
 		if !ok || state.Action == nil {
 			// configuration error
+			panic("no action")
 		}
 
 		//save fsm

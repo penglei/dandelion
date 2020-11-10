@@ -1,0 +1,59 @@
+run:
+  # timeout for analysis, e.g. 30s, 5m
+  deadline: 10m
+  # include test files or not
+  tests: true
+  # disallowed from the implicit automatic updating of go.mod described above
+  modules-download-mode: readonly
+
+  skip-dirs:
+
+linters:
+  disable-all: true
+  enable:
+    - unused
+    - gofmt
+    - ineffassign
+    - govet
+    - deadcode
+    - structcheck
+    - varcheck
+    - typecheck
+    - golint
+    - unconvert
+    - staticcheck
+    - gosimple
+    - bodyclose
+    - goimports
+    - rowserrcheck
+    - errcheck
+    - goconst
+    - funlen
+    - lll
+    - gocyclo
+
+issues:
+  exclude-rules:
+    - linters:
+        - staticcheck
+      text: "SA1019:"
+
+linters-settings:
+  funlen:
+    lines: 80
+    statements: 80
+  goconst:
+    min-len: 2
+    min-occurrences: 4
+  gocyclo:
+    min-complexity: 20
+  goimports:
+    local-prefixes: github.com/penglei/dandelion
+  golint:
+    min-confidence: 0
+  govet:
+    check-shadowing: true
+  lll:
+    line-length: 120
+  errcheck:
+    check-type-assertions: true

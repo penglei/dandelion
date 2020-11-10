@@ -2,7 +2,6 @@ package executor
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 )
@@ -15,7 +14,7 @@ func safetyRun(ctx context.Context, fn func(context.Context) error) <-chan error
 			if r := recover(); r != nil {
 				select {
 				case <-ctx.Done():
-				case out <- errors.New(fmt.Sprintf("%v", r)):
+				case out <- fmt.Errorf("%v", r):
 				}
 			}
 		}()

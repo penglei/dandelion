@@ -2,13 +2,16 @@ package database
 
 import (
 	"context"
-	_ "github.com/go-sql-driver/mysql"
-	"github.com/penglei/dandelion/util"
 	"time"
+
+	//ignore
+	_ "github.com/go-sql-driver/mysql"
+
+	"github.com/penglei/dandelion/util"
 )
 
 type ProcessDataObject struct {
-	Uuid      string
+	UUID      string
 	User      string
 	Event     string
 	Class     string
@@ -28,7 +31,7 @@ type ProcessTriggerObject struct {
 }
 
 type TaskDataObject struct {
-	ProcessUuid string
+	ProcessUUID string
 	Name        string
 	Status      string
 	ErrorCode   string
@@ -41,11 +44,11 @@ type Database interface {
 	LoadTriggers(context.Context) ([]*ProcessTriggerObject, error)
 	LoadUnfinishedProcesses() ([]*ProcessDataObject, error)
 	CreateProcessTrigger(ctx context.Context, meta *ProcessTriggerObject) error
-	DeleteProcessTrigger(ctx context.Context, processUuid string) error
+	DeleteProcessTrigger(ctx context.Context, processUUID string) error
 	InitProcessInstanceOnce(ctx context.Context, data ProcessDataObject) (created bool, err error)
 	GetProcess(ctx context.Context, id string) (*ProcessDataObject, error)
 	UpdateProcessContext(ctx context.Context, processData ProcessDataObject) error
-	UpdateProcessStat(ctx context.Context, processUuid string, mask util.BitMask) error
+	UpdateProcessStat(ctx context.Context, processUUID string, mask util.BitMask) error
 	CreateOrUpdateTaskDetail(ctx context.Context, data TaskDataObject, opts ...util.BitMask) error
-	GetProcessTasks(ctx context.Context, processId string) ([]*TaskDataObject, error)
+	GetProcessTasks(ctx context.Context, processID string) ([]*TaskDataObject, error)
 }

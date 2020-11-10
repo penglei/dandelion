@@ -2,16 +2,18 @@ package executor
 
 import (
 	"context"
+
+	"go.uber.org/zap"
+
 	"github.com/penglei/dandelion/fsm"
 	"github.com/penglei/dandelion/scheme"
 	"github.com/penglei/dandelion/util"
-	"go.uber.org/zap"
 )
 
 type SnapshotExporter interface {
-	WriteProcess(processUuid string, snapshot ProcessState) error
-	ReadProcess(processUuid string) (*ProcessState, error)
-	WriteTaskDetail(processUuid string,
+	WriteProcess(processUUID string, snapshot ProcessState) error
+	ReadProcess(processUUID string) (*ProcessState, error)
+	WriteTaskDetail(processUUID string,
 		taskName string,
 		data TaskStateDetail,
 		opts ...util.BitMask) error
@@ -45,7 +47,8 @@ func (machine *processMachine) SetTaskState(taskScheme scheme.TaskScheme, persis
 	}
 }
 
-func (machine *processMachine) SaveTaskStateDetail(persistence fsm.Persistence, name string, taskErr *SortableError) error {
+func (machine *processMachine) SaveTaskStateDetail(
+	persistence fsm.Persistence, name string, taskErr *SortableError) error {
 	taskDetail := TaskStateDetail{
 		Status: persistence.Current.String(),
 	}
@@ -74,7 +77,7 @@ func (machine *processMachine) InitTaskDetailOnce(taskScheme scheme.TaskScheme) 
 }
 
 func (machine *processMachine) Forward(ctx context.Context, event fsm.EventType) error {
-	err := machine.fsm.SendEvent(event, ctx)
+	err := machine.fsm.SendEvent(ctx, event)
 	return err
 }
 
@@ -102,7 +105,7 @@ func (machine *processMachine) Save(persistence fsm.Persistence) error {
 
 // task
 
-type taskMachine struct {
+type TaskMachine struct {
 	scheme  scheme.TaskScheme
 	fsm     *fsm.StateMachine
 	parent  *processMachine
@@ -111,12 +114,12 @@ type taskMachine struct {
 }
 
 //init
-func (t *taskMachine) Restate(s TaskState) {
+func (t *TaskMachine) Restate(s TaskState) {
 	t.initial = s
 	t.fsm.Restore(s.FsmPersistence)
 }
 
-func (t *taskMachine) Save(persistence fsm.Persistence) error {
+func (t *TaskMachine) Save(persistence fsm.Persistence) error {
 	t.parent.SetTaskState(t.scheme, persistence)
 	//fmt.Printf("-------------------------------------------------------\n")
 	//fmt.Printf("persistence: %v\n", persistence)
@@ -128,31 +131,31 @@ func (t *taskMachine) Save(persistence fsm.Persistence) error {
 	return err
 }
 
-func (t *taskMachine) Run(ctx context.Context) error {
-	return t.fsm.SendEvent(Run, ctx)
+func (t *TaskMachine) Run(ctx context.Context) error {
+	return t.fsm.SendEvent(ctx, Run)
 }
-func (t *taskMachine) Resume(ctx context.Context) error {
-	return t.fsm.SendEvent(Resume, ctx)
+func (t *TaskMachine) Resume(ctx context.Context) error {
+	return t.fsm.SendEvent(ctx, Resume)
 }
-func (t *taskMachine) Retry(ctx context.Context) error {
-	return t.fsm.SendEvent(Retry, ctx)
+func (t *TaskMachine) Retry(ctx context.Context) error {
+	return t.fsm.SendEvent(ctx, Retry)
 }
-func (t *taskMachine) Rollback(ctx context.Context) error {
-	return t.fsm.SendEvent(Rollback, ctx)
+func (t *TaskMachine) Rollback(ctx context.Context) error {
+	return t.fsm.SendEvent(ctx, Rollback)
 }
-func (t *taskMachine) Recovery(ctx context.Context) error {
+func (t *TaskMachine) Recovery(ctx context.Context) error {
 	nextEvent := t.initial.FsmPersistence.Event
-	return t.fsm.SendEvent(nextEvent, ctx)
+	return t.fsm.SendEvent(ctx, nextEvent)
 }
 
-var _ fsm.IStore = &taskMachine{}
+var _ fsm.IStore = &TaskMachine{}
 
 func NewTaskMachine(
 	scheme scheme.TaskScheme,
 	parent *processMachine,
 	lgr *zap.Logger,
-) *taskMachine {
-	taskInstance := &taskMachine{
+) *TaskMachine {
+	taskInstance := &TaskMachine{
 		scheme: scheme,
 		parent: parent,
 	}

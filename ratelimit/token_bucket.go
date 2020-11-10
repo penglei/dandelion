@@ -42,12 +42,12 @@ func (tb *TokenBucket) acquire(now time.Time, n int) (int, error) {
 	if n <= tb.currentAmount {
 		tb.currentAmount -= n
 		return n, nil
-	} else {
-		//token isn't enough
-		var all = tb.currentAmount
-		tb.currentAmount = 0
-		return all, nil
 	}
+	// else
+	//token isn't enough
+	var all = tb.currentAmount
+	tb.currentAmount = 0
+	return all, nil
 }
 
 func (tb *TokenBucket) Acquire(n int) error {
