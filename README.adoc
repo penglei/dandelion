@@ -1,3 +1,7 @@
 = dandelion
 
-a simple library to execute asynchronous task
+a simple library for executing asynchronous task
+
+== TODO
+
+. queue events in mailbox of each process.
