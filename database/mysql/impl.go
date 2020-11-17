@@ -15,7 +15,7 @@ type mysqlDatabase struct {
 
 func (ms *mysqlDatabase) LoadTriggers(ctx context.Context) ([]*database.ProcessTriggerObject, error) {
 	querySQL := "SELECT `id`, `uuid`, `user`, `class`, `data`, `event`" +
-		"FROM process_trigger WHERE `deleted_flag` = 0 ORDER BY `id`"
+		" FROM process_trigger WHERE `deleted_flag` = 0 ORDER BY `id`"
 	rows, err := ms.db.QueryContext(ctx, querySQL)
 	if err != nil {
 		return nil, err
@@ -48,7 +48,7 @@ func (ms *mysqlDatabase) LoadUnfinishedProcesses() ([]*database.ProcessDataObjec
 	defer func() { _ = tx.Rollback() }()
 
 	querySQL := "SELECT `status`, `state`, `user`, `class`, `uuid` FROM process" +
-		"WHERE stage_committed = 0 OR `status` IN ('Interrupted', 'RInterrupted')"
+		" WHERE stage_committed = 0 OR `status` IN ('Interrupted', 'RInterrupted')"
 	rows, err := tx.Query(querySQL)
 	if err != nil {
 		return nil, err
@@ -282,7 +282,7 @@ func (ms *mysqlDatabase) DeleteProcessTrigger(ctx context.Context, uuid string) 
 
 func (ms *mysqlDatabase) GetProcessTasks(ctx context.Context, processUUID string) ([]*database.TaskDataObject, error) {
 	querySQL := "SELECT a.`name`, a.`status`, a.`err_code`, a.`err_msg`, a.`started_at`, a.`ended_at` FROM" +
-		"process_task as a LEFT JOIN process as b ON a.process_uuid = b.uuid WHERE uuid = ? ORDER BY a.id"
+		" process_task as a LEFT JOIN process as b ON a.process_uuid = b.uuid WHERE uuid = ? ORDER BY a.id"
 	rows, err := ms.db.QueryContext(ctx, querySQL, processUUID)
 	if err != nil {
 		return nil, err
